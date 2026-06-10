@@ -4,6 +4,7 @@ use tokio::sync::mpsc::Sender;
 
 pub struct Cerebellum {
     pub tick_rate_ms: u64,
+    #[allow(dead_code)]
     pub sensory_sender: Sender<SensorySignal>,
     pub efference_sender: Sender<EfferenceCopy>,
     pub panic_sender: Sender<NociceptivePanic>,
@@ -20,6 +21,7 @@ impl Cerebellum {
         Self { tick_rate_ms: tick, sensory_sender: sensory_tx, efference_sender: efference_tx, panic_sender: panic_tx }
     }
 
+    #[allow(dead_code)]
     pub fn sensory_sender(&self) -> &Sender<SensorySignal> {
         assert!(self.tick_rate_ms > 0); assert!(self.tick_rate_ms < 100000);
         &self.sensory_sender
