@@ -1,0 +1,36 @@
+# ==============================================================================
+# Stage 1: Build stage
+# ==============================================================================
+FROM rust:1.80-slim-bookworm AS builder
+
+WORKDIR /usr/src/ferro-core
+COPY ./ferro-core .
+
+# 静的リンクと最適化を伴うコンパイルを実行
+RUN cargo build --release
+
+# ==============================================================================
+# Stage 2: Runtime stage
+# ==============================================================================
+FROM debian:bookworm-slim
+
+# 非特権ユーザーの作成 (UID: 10001, GID: 10001)
+RUN groupadd -g 10001 ferro && \
+    useradd -u 10001 -g ferro -m -s /sbin/nologin ferro
+
+# 不要なパッケージやシェルの削除（セキュリティ最小化）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=builder /usr/src/ferro-core/target/release/ferro-core /app/ferro-core
+
+# 共有マウント用のディレクトリ作成と所有権変更
+RUN mkdir -p /memory && chown -R ferro:ferro /app /memory
+
+# 実行ユーザーの切り替え
+USER ferro:ferro
+
+# コンテナ起動コマンド
+ENTRYPOINT ["/app/ferro-core"]
