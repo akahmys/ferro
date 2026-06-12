@@ -1,5 +1,16 @@
+use std::path::PathBuf;
 use std::process::ExitStatus;
 use tokio::process::Command;
+
+fn get_seccomp_profile_path() -> PathBuf {
+    let curr = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let path = if curr.ends_with("ferro-shell") {
+        curr.join("seccomp_profile.json")
+    } else {
+        curr.join("ferro-shell/seccomp_profile.json")
+    };
+    path.canonicalize().unwrap_or(path)
+}
 
 /// Runs the `ferro-core` docker container with safety options.
 ///
@@ -25,7 +36,10 @@ pub async fn run_container(
         .output()
         .await;
 
+    let seccomp_path = get_seccomp_profile_path();
+    let seccomp_arg = format!("seccomp={}", seccomp_path.to_string_lossy());
     let mount_arg = format!("type=bind,source={},target=/memory", memory_host_path);
+
     let mut child = Command::new("docker")
         .args([
             "run",
@@ -43,6 +57,8 @@ pub async fn run_container(
             "/tmp:rw,noexec,nosuid",
             "--security-opt",
             "no-new-privileges",
+            "--security-opt",
+            &seccomp_arg,
             "--cap-drop",
             "ALL",
             "--mount",
@@ -92,3 +108,22 @@ pub async fn cleanup_container(container_name: &str) -> Result<(), Box<dyn std::
 
     Ok(())
 }
+
+/// Stops the container cleanly.
+///
+/// # Errors
+/// Returns an error if the command invocation fails.
+pub async fn stop_container(container_name: &str) -> Result<(), Box<dyn std::error::Error>> {
+    assert!(!container_name.is_empty(), "Container name must not be empty");
+    assert!(container_name.len() >= 3, "Container name must be of reasonable length");
+
+    let _ = Command::new("docker")
+        .args(["stop", "-t", "5", container_name])
+        .output()
+        .await?;
+
+    assert!(!container_name.is_empty(), "Container name remains valid");
+    Ok(())
+}
+
+

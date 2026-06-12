@@ -31,6 +31,10 @@ pub async fn start_receiver(
                             if act.timestamp > last_text_ts {
                                 last_text_ts = act.timestamp;
                                 state = Some(update_state(state.take(), Some(act), None));
+                            } else if act.timestamp < last_text_ts && act.timestamp > 0 {
+                                println!("[ferro-env] Core text timestamp reset detected ({} -> {}). Re-syncing.", last_text_ts, act.timestamp);
+                                last_text_ts = act.timestamp;
+                                state = Some(update_state(state.take(), Some(act), None));
                             }
                         }
                     }
@@ -39,6 +43,10 @@ pub async fn start_receiver(
                     if let Ok(c) = fs::read_to_string(&audio_path).await {
                         if let Ok(act) = serde_json::from_str::<VocalAudioAction>(&c) {
                             if act.timestamp > last_audio_ts {
+                                last_audio_ts = act.timestamp;
+                                state = Some(update_state(state.take(), None, Some(act)));
+                            } else if act.timestamp < last_audio_ts && act.timestamp > 0 {
+                                println!("[ferro-env] Core audio timestamp reset detected ({} -> {}). Re-syncing.", last_audio_ts, act.timestamp);
                                 last_audio_ts = act.timestamp;
                                 state = Some(update_state(state.take(), None, Some(act)));
                             }

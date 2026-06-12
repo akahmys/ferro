@@ -1,0 +1,24 @@
+{
+  "defaultAction": "SCMP_ACT_ALLOW",
+  "architectures": [
+    "SCMP_ARCH_X86_64",
+    "SCMP_ARCH_X86",
+    "SCMP_ARCH_AARCH64"
+  ],
+  "syscalls": [
+    {
+      "names": [
+        "socket",
+        "socketpair",
+        "connect",
+        "accept",
+        "accept4",
+        "listen",
+        "bind"
+      ],
+      "action": "SCMP_ACT_KILL",
+      "args": [],
+      "comment": "Block socket operations to force SIGSYS (exit status 159) upon network breach attempts"
+    }
+  ]
+}

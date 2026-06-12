@@ -79,6 +79,13 @@ async fn test_ethical_audit_violation() {
 #[tokio::test]
 async fn test_active_inference_mitosis() {
     let mut node = ClusterNode::new("mitosis_node".to_string());
+    node.local_free_energy = 0.85;
+    node.concept_nodes = vec![
+        crate::cortex::ConceptNode { id: "n1".to_string(), activation: 0.9 },
+        crate::cortex::ConceptNode { id: "n2".to_string(), activation: 0.8 },
+        crate::cortex::ConceptNode { id: "n3".to_string(), activation: 0.7 },
+        crate::cortex::ConceptNode { id: "n4".to_string(), activation: 0.6 },
+    ];
     
     let event = EpisodicSlot {
         timestamp: 1234,
@@ -93,8 +100,35 @@ async fn test_active_inference_mitosis() {
     assert!(result.is_some());
     
     if let Some(child) = result {
-        assert_eq!(child.cluster_id, "mitosis_node_child");
+        assert!(child.cluster_id.starts_with("mitosis_node_child_"));
         assert!(child.local_free_energy > 0.0);
     }
+}
+
+#[tokio::test]
+async fn test_surprise_reduction_simulation() {
+    let (phase_tx, _) = broadcast::channel(10);
+    let temp_history = std::env::temp_dir().join("surprise_history_test.csv");
+    let path = temp_history.to_str().map(|s| s.to_string()).unwrap_or_default();
+
+    let mut cerebrum = Cerebrum::new(phase_tx, &path, 10);
+    
+    let surprises = vec![0.85, 0.72, 0.60, 0.45, 0.30];
+    let mut now = 1620000000;
+    for s in surprises {
+        now += 10;
+        let res = cerebrum.record_free_energy(now, s).await;
+        assert!(res.is_ok(), "Record free energy must succeed");
+    }
+
+    assert!(temp_history.exists(), "History CSV file must exist");
+
+    if let Ok(content) = std::fs::read_to_string(&temp_history) {
+        assert!(content.contains("1620000010"), "CSV must contain timestamp");
+        println!("--- TEST_SURPRISE_HISTORY_START ---");
+        println!("{}", content);
+        println!("--- TEST_SURPRISE_HISTORY_END ---");
+    }
+    let _ = std::fs::remove_file(&temp_history);
 }
 

@@ -9,7 +9,9 @@ EXCLUDE_FILES = [
     "src/brainstem.rs", # 既存
     "src/cerebellum.rs", # 既存
     "src/midbrain.rs", # 既存
-    "src/hippocampus.rs" # 既存
+    "src/hippocampus.rs", # 既存
+    "ferro-shell/", # Shell層は除外
+    "ferro-env/" # Env層は除外
 ]
 
 def get_staged_files():

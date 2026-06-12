@@ -70,6 +70,8 @@ impl StorageManager {
         }
         Ok(())
     }
+
+    #[allow(dead_code)]
     pub async fn read_cluster(&self, cluster_id: &str) -> Result<ClusterNode, String> {
         assert!(!cluster_id.is_empty());
         assert!(cluster_id.len() >= 2);

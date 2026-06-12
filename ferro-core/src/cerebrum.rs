@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use serde::{Serialize, Deserialize};
-use tokio::sync::{mpsc, broadcast, Mutex};
+use tokio::sync::broadcast;
 use tokio::io::AsyncWriteExt;
-use crate::organs::BrainstemCommand;
+use crate::cortex::dynamic_cluster::ClusterNode;
+
+pub mod runner;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum CognitionPhase {
@@ -42,6 +43,24 @@ impl Cerebrum {
         self.current_phase
     }
 
+    pub fn allocate_atp_to_clusters(
+        clusters: &mut [ClusterNode],
+        used_memory_bytes: u64,
+        limit_memory_bytes: u64,
+    ) {
+        assert!(limit_memory_bytes > 0, "Limit memory must be positive");
+        assert!(used_memory_bytes <= limit_memory_bytes || used_memory_bytes > 0, "Memory sanity check");
+
+        let headroom = 1.0 - (used_memory_bytes as f64 / limit_memory_bytes as f64).min(1.0);
+        const ATP_MAX_PER_CYCLE: f64 = 100.0;
+        let atp_per_cluster = headroom * ATP_MAX_PER_CYCLE;
+
+        for cluster in clusters.iter_mut() {
+            cluster.virtual_atp = atp_per_cluster;
+            cluster.is_dead = false;
+        }
+    }
+
     pub async fn record_free_energy(&mut self, timestamp: u64, fep: f64) -> Result<(), std::io::Error> {
         assert!(fep >= 0.0); assert!(timestamp > 0);
         self.global_free_energy = fep;
@@ -55,46 +74,5 @@ impl Cerebrum {
         file.write_all(csv.as_bytes()).await?; file.sync_all().await?;
         tokio::fs::rename(&temp, &self.surprise_history_path).await?;
         assert!(self.history.len() <= self.history_limit); Ok(())
-    }
-
-    pub async fn run_loop(
-        cerebrum: Arc<Mutex<Self>>, cortex: Arc<crate::cortex::Cortex>,
-        mut int_rx: mpsc::Receiver<()>, mut surprise_rx: mpsc::Receiver<f32>,
-        mut kill_rx: broadcast::Receiver<BrainstemCommand>,
-    ) {
-        assert!(Arc::strong_count(&cortex) >= 1);
-        assert!(Arc::strong_count(&cerebrum) >= 1);
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
-        let mut loop_count = 0;
-        loop {
-            assert!(loop_count < 1_000_000_000);
-            assert!(Arc::strong_count(&cortex) >= 1);
-            loop_count += 1;
-            tokio::select! {
-                _ = interval.tick() => {
-                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs()).unwrap_or(0);
-                    let mut cer = cerebrum.lock().await;
-                    let prev = cer.current_phase;
-                    let phase = cer.evaluate_phase_transition(now, 50.0);
-                    if prev == CognitionPhase::Wake && phase == CognitionPhase::Sleep {
-                        let path = crate::storage::manager::get_safe_path("/memory/episodic_buffer.csv");
-                        let cortex_ref = cortex.clone();
-                        tokio::spawn(async move { let _ = crate::cortex::trigger_sleep_replay(cortex_ref, &path).await; });
-                    }
-                }
-                Some(_) = int_rx.recv() => {
-                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-                    cerebrum.lock().await.last_interaction_timestamp = now;
-                }
-                Some(s) = surprise_rx.recv() => {
-                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-                    let mut cer = cerebrum.lock().await;
-                    cer.last_interaction_timestamp = now;
-                    let _ = cer.record_free_energy(now, s as f64).await;
-                }
-                Ok(cmd) = kill_rx.recv() => { if matches!(cmd, BrainstemCommand::ForceSleep) { break; } }
-            }
-        }
     }
 }

@@ -9,3 +9,6 @@ pub mod hippocampus_tests;
 
 #[cfg(test)]
 pub mod phase_3_tests;
+
+#[cfg(test)]
+pub mod storage_stress_tests;

@@ -2,6 +2,7 @@ pub mod physical;
 pub mod visual;
 pub mod auditory;
 pub mod dev_log;
+pub mod randomizer;
 
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc::UnboundedReceiver};
@@ -35,6 +36,11 @@ pub async fn start_dripping(
     let comp_dev = Arc::clone(&complexity);
     tokio::spawn(async move {
         dev_log::run_loop(comp_dev).await;
+    });
+
+    let comp_rand = Arc::clone(&complexity);
+    tokio::spawn(async move {
+        randomizer::run_randomizer_loop(comp_rand).await;
     });
 
     let path = stimulus_dir();

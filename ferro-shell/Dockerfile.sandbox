@@ -1,0 +1,20 @@
+# ==============================================================================
+# Dockerfile.sandbox: Secure, isolated sandbox for test execution
+# ==============================================================================
+FROM rust:1.80-slim-bookworm
+
+# Create a non-privileged user (UID: 10001, GID: 10001) for execution safety
+RUN groupadd -g 10001 ferro && \
+    useradd -u 10001 -g ferro -m -s /sbin/nologin ferro
+
+WORKDIR /workspace
+
+# Create directory for cargo target and cache, and change ownership
+RUN mkdir -p /workspace/target /workspace/.cargo && \
+    chown -R ferro:ferro /workspace
+
+# Switch to the non-privileged user
+USER ferro:ferro
+
+# Default entrypoint is to run cargo test in the mounted workspace
+ENTRYPOINT ["cargo", "test"]

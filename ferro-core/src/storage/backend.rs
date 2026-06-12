@@ -74,6 +74,7 @@ pub async fn write_json_cluster(
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn read_json_cluster(
     base_path: &Path,
     cluster_id: &str,

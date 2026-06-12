@@ -6,6 +6,8 @@ mod pruning;
 mod monitor;
 mod cli;
 mod injector;
+mod agents;
+mod evolution;
 
 use std::path::Path;
 use tokio::sync::oneshot;
@@ -70,10 +72,37 @@ async fn run_monitor_debug(mem_dir: &str) -> Result<(), Box<dyn std::error::Erro
         let _ = tx.send(());
     });
 
-    monitor::run_monitor_daemon(Path::new(mem_dir), rx).await?;
+    monitor::run_monitor_daemon(Path::new(mem_dir), rx, None).await?;
 
     assert!(Path::new(mem_dir).is_dir(), "Memory dir remains valid after monitor");
     assert!(!mem_dir.is_empty(), "Memory dir non-empty");
+    Ok(())
+}
+
+async fn rebuild_core_runtime() -> Result<(), Box<dyn std::error::Error>> {
+    let curr = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let (dockerfile_path, context_path) = if curr.ends_with("ferro-shell") {
+        (curr.join("Dockerfile.core"), curr.parent().unwrap().to_path_buf())
+    } else {
+        (curr.join("ferro-shell/Dockerfile.core"), curr.clone())
+    };
+
+    println!("[ferro-shell] Rebuilding ferro-core-runtime using Dockerfile {:?}", dockerfile_path);
+    let status = tokio::process::Command::new("docker")
+        .args([
+            "build",
+            "-f",
+            &dockerfile_path.to_string_lossy(),
+            "-t",
+            "ferro-core-runtime:latest",
+            &context_path.to_string_lossy(),
+        ])
+        .status()
+        .await?;
+
+    if !status.success() {
+        return Err("Failed to build ferro-core-runtime image".into());
+    }
     Ok(())
 }
 
@@ -86,23 +115,65 @@ async fn run_lifecycle_loop(memory_host_path: &str) -> Result<(), Box<dyn std::e
     while attempt < MAX_RECOVERY_ATTEMPTS {
         attempt += 1;
         println!("[ferro-shell] Start cycle {}/{}...", attempt, MAX_RECOVERY_ATTEMPTS);
-        pruning::prune_resources(memory_host_path)?;
+        
+        pruning::prune_resources(memory_host_path, None).await?;
+
+        if let Err(e) = rebuild_core_runtime().await {
+            eprintln!("[ferro-shell] Error rebuilding runtime: {:?}", e);
+        }
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let (sleep_tx, sleep_rx) = oneshot::channel();
         let path_clone = memory_host_path.to_string();
         let daemon_handle = tokio::spawn(async move {
             let path = Path::new(&path_clone);
-            let _ = monitor::run_monitor_daemon(path, shutdown_rx).await;
+            let _ = monitor::run_monitor_daemon(path, shutdown_rx, Some(sleep_tx)).await;
         });
 
-        let status = container::run_container(CONTAINER_NAME, memory_host_path).await?;
-        println!("[ferro-shell] Container exited with status: {:?}", status);
+        let path_clone_2 = memory_host_path.to_string();
+        let mut container_join = tokio::spawn(async move {
+            container::run_container(CONTAINER_NAME, &path_clone_2).await.map_err(|e| e.to_string())
+        });
+
+        let mut sleep_triggered = false;
+        let exit_status = tokio::select! {
+            res = &mut container_join => {
+                match res {
+                    Ok(Ok(status)) => {
+                        println!("[ferro-shell] Container exited naturally: {:?}", status);
+                        Some(status)
+                    }
+                    _ => {
+                        println!("[ferro-shell] Container execution failed");
+                        None
+                    }
+                }
+            }
+            _ = sleep_rx => {
+                println!("[ferro-shell] Sleep phase transition detected. Stopping container...");
+                sleep_triggered = true;
+                let _ = container::stop_container(CONTAINER_NAME).await;
+                match container_join.await {
+                    Ok(Ok(status)) => Some(status),
+                    _ => None
+                }
+            }
+        };
 
         let _ = shutdown_tx.send(());
         let _ = daemon_handle.await;
 
-        pruning::prune_resources(memory_host_path)?;
+        let exit_code = exit_status.and_then(|s| s.code());
         container::cleanup_container(CONTAINER_NAME).await?;
+
+        if sleep_triggered {
+            println!("[ferro-shell] Starting evolutionary adaptation loop...");
+            if let Err(e) = evolution::run_evolution_cycle(memory_host_path).await {
+                eprintln!("[ferro-shell] Evolutionary cycle error: {:?}", e);
+            }
+        } else {
+            pruning::prune_resources(memory_host_path, exit_code).await?;
+        }
     }
 
     assert!(attempt == MAX_RECOVERY_ATTEMPTS, "Lifecycle loop executed fully");
