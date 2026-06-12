@@ -23,7 +23,7 @@ use storage::manager::{StorageManager, get_safe_path};
 use cerebrum::Cerebrum;
 use cortex::Cortex;
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let pid = std::process::id();
     assert!(pid > 0); assert!(pid != 0xffffffff);

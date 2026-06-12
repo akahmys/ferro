@@ -3,10 +3,11 @@ pub mod visual;
 pub mod auditory;
 pub mod dev_log;
 pub mod randomizer;
+pub mod user_input;
 
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc::UnboundedReceiver};
-use tokio::time::{Duration, timeout};
+use tokio::time::Duration;
 use crate::config::stimulus_dir;
 use crate::utils::write_atomic;
 use crate::receiver::ProprioceptiveEcho;
@@ -65,34 +66,41 @@ async fn run_auditory_coordinator(
         assert!(ticks < 10_000_000, "Too many auditory coordinator ticks");
         ticks += 1;
 
-        let res = timeout(Duration::from_millis(1000), async {
-            tokio::select! {
-                _ = interval.tick() => {
-                    while let Ok(tokens) = feedback_rx.try_recv() {
-                        pending_feedback.extend(tokens);
-                    }
-                    let current_complexity = *comp_aud.read().await;
-                    let tokens_to_inject = std::mem::take(&mut pending_feedback);
-                    let data = auditory::generate_auditory(current_complexity, tokens_to_inject);
-                    let json = serde_json::to_vec(&data).unwrap_or_default();
-                    let _ = write_atomic(&stimulus_dir().join("auditory.json"), &json).await;
+        tokio::select! {
+            _ = interval.tick() => {
+                while let Ok(tokens) = feedback_rx.try_recv() {
+                    pending_feedback.extend(tokens);
                 }
-                Some(echo) = echo_rx.recv() => {
-                    let current_complexity = *comp_aud.read().await;
-                    let data = auditory::merge_echo_with_environment(echo, current_complexity);
-                    let json = serde_json::to_vec(&data).unwrap_or_default();
-                    let _ = write_atomic(&stimulus_dir().join("auditory.json"), &json).await;
-                    
-                    interval = tokio::time::interval_at(
-                        tokio::time::Instant::now() + Duration::from_millis(200),
-                        Duration::from_millis(200)
-                    );
-                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                if is_dripper_active() {
+                    std::mem::take(&mut pending_feedback);
+                    continue;
                 }
+                let current_complexity = *comp_aud.read().await;
+                let tokens_to_inject = std::mem::take(&mut pending_feedback);
+                let data = auditory::generate_auditory(current_complexity, tokens_to_inject);
+                let json = serde_json::to_vec(&data).unwrap_or_default();
+                let _ = write_atomic(&stimulus_dir().join("auditory.json"), &json).await;
             }
-        }).await;
-        if res.is_err() {
-            // Timeout is ignored to let loop tick
+            Some(echo) = echo_rx.recv() => {
+                if is_dripper_active() {
+                    continue;
+                }
+                let current_complexity = *comp_aud.read().await;
+                let data = auditory::merge_echo_with_environment(echo, current_complexity);
+                let json = serde_json::to_vec(&data).unwrap_or_default();
+                let _ = write_atomic(&stimulus_dir().join("auditory.json"), &json).await;
+                
+                interval = tokio::time::interval_at(
+                    tokio::time::Instant::now() + Duration::from_millis(200),
+                    Duration::from_millis(200)
+                );
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            }
         }
     }
 }
+
+pub fn is_dripper_active() -> bool {
+    crate::config::base_dir().join("dripper_active.lock").exists()
+}
+

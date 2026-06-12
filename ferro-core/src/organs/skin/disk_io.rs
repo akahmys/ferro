@@ -9,6 +9,11 @@ pub struct DiskIoActor {
     pub check_interval_ms: u64,
 }
 
+#[derive(serde::Deserialize, Debug, Clone)]
+struct PhysicalStimulus {
+    disk_io: f64,
+}
+
 impl DiskIoActor {
     pub fn new(sender: Sender<InteroceptiveSignal>, last_value: f64, check_interval_ms: u64) -> Self {
         assert!(check_interval_ms > 0);
@@ -32,7 +37,7 @@ impl DiskIoActor {
                 async {
                     tokio::select! {
                         _ = interval.tick() => {
-                            let current_io = Self::read_system_disk_io();
+                            let current_io = Self::read_system_disk_io().await;
                             if (current_io - self.last_value).abs() > 0.1 {
                                 self.last_value = current_io;
                                 let _ = self.sender.send(InteroceptiveSignal::DiskIo(current_io)).await;
@@ -52,11 +57,19 @@ impl DiskIoActor {
         }
     }
 
-    fn read_system_disk_io() -> f64 {
-        let val = 0.5;
+    async fn read_system_disk_io() -> f64 {
         let pid = std::process::id();
         assert!(pid > 0);
-        assert!(val < 10000.0);
-        val
+        let path = std::path::Path::new("/memory/stimulus/physical.json");
+        if !path.is_file() {
+            return 0.5;
+        }
+        if let Ok(content) = tokio::fs::read_to_string(path).await {
+            if let Ok(stimulus) = serde_json::from_str::<PhysicalStimulus>(&content) {
+                assert!(stimulus.disk_io >= 0.0);
+                return stimulus.disk_io;
+            }
+        }
+        0.5
     }
 }

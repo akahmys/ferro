@@ -97,10 +97,21 @@ impl BackupGuard {
             }
         }
 
-        // Move zpd_control
-        let zpd = base_dir.join("zpd_control.json");
-        if zpd.exists() {
-            let _ = fs::rename(&zpd, backup_dir.join("zpd_control.json")).await;
+        // Move other memory files
+        let files_to_backup = [
+            "zpd_control.json",
+            "surprise_history.csv",
+            "pain_history.csv",
+            "episodic_buffer.csv",
+            "action_history.log",
+            "dashboard_chat_history.json",
+            "user_input.json",
+        ];
+        for file_name in files_to_backup {
+            let file_path = base_dir.join(file_name);
+            if file_path.exists() {
+                let _ = fs::rename(&file_path, backup_dir.join(file_name)).await;
+            }
         }
 
         BackupGuard {
@@ -138,9 +149,20 @@ impl Drop for BackupGuard {
             }
         }
 
-        let zpd = self.backup_dir.join("zpd_control.json");
-        if zpd.exists() {
-            let _ = std::fs::rename(&zpd, self.base_dir.join("zpd_control.json"));
+        let files_to_restore = [
+            "zpd_control.json",
+            "surprise_history.csv",
+            "pain_history.csv",
+            "episodic_buffer.csv",
+            "action_history.log",
+            "dashboard_chat_history.json",
+            "user_input.json",
+        ];
+        for file_name in files_to_restore {
+            let file_path = self.backup_dir.join(file_name);
+            if file_path.exists() {
+                let _ = std::fs::rename(&file_path, self.base_dir.join(file_name));
+            }
         }
 
         let _ = std::fs::remove_dir_all(&self.backup_dir);
@@ -326,8 +348,8 @@ async fn test_simulation_layer() {
     let dev_content = fs::read_to_string(&dev_log_path).await.unwrap();
     let dev: DevLog = serde_json::from_str(&dev_content).unwrap();
     assert!(
-        dev.increment.contains("WARN:") || dev.increment.contains("ERROR:"),
-        "High complexity dev log should contain WARN or ERROR level: {}", dev.increment
+        dev.increment.contains("WARN:") || dev.increment.contains("ERROR:") || dev.increment.contains("FATAL"),
+        "High complexity dev log should contain WARN, ERROR, or FATAL level: {}", dev.increment
     );
 
     // --- TEST 4: Timing / Interval Verification ---

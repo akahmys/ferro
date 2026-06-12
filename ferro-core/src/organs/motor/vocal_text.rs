@@ -45,8 +45,10 @@ impl VocalTextActor {
                                 }
                                 let tokens = Self::tokenize_payload(&cmd.payload);
                                 let _ = self.feedback_monitor.capture_proprioceptive_echo(tokens).await;
+                                false
+                            } else {
+                                true // Channel is closed, trigger loop break
                             }
-                            false
                         }
                         cmd_res = kill_rx.recv() => {
                             matches!(cmd_res, Ok(BrainstemCommand::ForceSleep))

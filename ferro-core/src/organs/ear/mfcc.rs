@@ -6,6 +6,11 @@ pub struct MfccActor {
     pub sender: Sender<SensorySignal>,
 }
 
+#[derive(serde::Deserialize, Debug, Clone)]
+struct AuditoryStimulus {
+    mfcc: Vec<f32>,
+}
+
 impl MfccActor {
     pub fn new(sender: Sender<SensorySignal>) -> Self {
         let pid = std::process::id();
@@ -61,7 +66,13 @@ impl MfccActor {
             None
         } else {
             assert!(!is_muted);
-            Some(vec![1.0, -1.0])
+            let path = std::path::Path::new("/memory/stimulus/auditory.json");
+            if !path.is_file() {
+                return None;
+            }
+            let content = tokio::fs::read_to_string(path).await.ok()?;
+            let stimulus: AuditoryStimulus = serde_json::from_str(&content).ok()?;
+            Some(stimulus.mfcc)
         }
     }
 }

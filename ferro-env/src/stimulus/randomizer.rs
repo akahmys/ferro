@@ -15,6 +15,11 @@ pub async fn run_randomizer_loop(complexity: Arc<RwLock<f64>>) {
         assert!(ticks < 100_000_000, "Too many randomization ticks");
         ticks += 1;
 
+        if crate::stimulus::is_dripper_active() {
+            tokio::time::sleep(Duration::from_millis(1000)).await;
+            continue;
+        }
+
         let sleep_ms = {
             let mut rng = rand::thread_rng();
             rng.gen_range(500..3000)

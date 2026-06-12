@@ -122,7 +122,9 @@ pub async fn prune_resources(
                     if let Ok(file) = fs::File::open(&hippo_path) {
                         let mut rdr = csv::Reader::from_reader(file);
                         for rec in rdr.deserialize::<serde_json::Value>().flatten() {
-                            if let Some(id_str) = rec.get("target_cluster_id").and_then(|v| v.as_str()) {
+                            if let Some(id_str) = rec.get("target_cluster_id")
+                                .or_else(|| rec.get("origin_cluster_id"))
+                                .and_then(|v| v.as_str()) {
                                 last_id = Some(id_str.to_string());
                             }
                         }

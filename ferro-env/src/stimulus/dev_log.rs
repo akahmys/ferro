@@ -5,7 +5,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::time::{sleep, Duration, timeout};
+use tokio::time::{sleep, Duration};
 use crate::config::stimulus_dir;
 use crate::utils::write_atomic;
 
@@ -68,16 +68,16 @@ pub async fn run_loop(complexity: Arc<RwLock<f64>>) {
     loop {
         assert!(ticks < 10_000_000, "Too many dev log ticks");
         ticks += 1;
-        let limit = Duration::from_millis(6000);
-        let res = timeout(limit, async {
-            let current_complexity = *complexity.read().await;
-            if let Some(data) = generate_dev_log(current_complexity) {
-                let json = serde_json::to_vec(&data).unwrap_or_default();
-                let path = stimulus_dir().join("dev_log.json");
-                let _ = write_atomic(&path, &json).await;
-            }
-            sleep(Duration::from_millis(5000)).await;
-        }).await;
-        if res.is_err() { break; }
+        if crate::stimulus::is_dripper_active() {
+            sleep(Duration::from_millis(2000)).await;
+            continue;
+        }
+        let current_complexity = *complexity.read().await;
+        if let Some(data) = generate_dev_log(current_complexity) {
+            let json = serde_json::to_vec(&data).unwrap_or_default();
+            let path = stimulus_dir().join("dev_log.json");
+            let _ = write_atomic(&path, &json).await;
+        }
+        sleep(Duration::from_millis(5000)).await;
     }
 }

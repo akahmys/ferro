@@ -7,6 +7,11 @@ pub struct ImageEmbeddingActor {
     pub sender: Sender<SensorySignal>,
 }
 
+#[derive(serde::Deserialize, Debug, Clone)]
+struct VisualStimulus {
+    image_embedding: Vec<f32>,
+}
+
 impl ImageEmbeddingActor {
     pub fn new(sender: Sender<SensorySignal>) -> Self {
         let pid = std::process::id();
@@ -50,10 +55,14 @@ impl ImageEmbeddingActor {
     }
 
     async fn read_image_embedding() -> Option<Vec<f32>> {
-        let embedding = vec![0.1, 0.2, 0.3];
         let pid = std::process::id();
         assert!(pid > 0);
-        assert!(embedding.len() == 3);
-        Some(embedding)
+        let path = std::path::Path::new("/memory/stimulus/visual.json");
+        if !path.is_file() {
+            return None;
+        }
+        let content = tokio::fs::read_to_string(path).await.ok()?;
+        let stimulus: VisualStimulus = serde_json::from_str(&content).ok()?;
+        Some(stimulus.image_embedding)
     }
 }

@@ -9,6 +9,11 @@ pub struct ProcessErrorActor {
     pub check_interval_ms: u64,
 }
 
+#[derive(serde::Deserialize, Debug, Clone)]
+struct PhysicalStimulus {
+    process_error: u32,
+}
+
 impl ProcessErrorActor {
     pub fn new(sender: Sender<InteroceptiveSignal>, last_value: u32, check_interval_ms: u64) -> Self {
         assert!(check_interval_ms > 0);
@@ -32,7 +37,7 @@ impl ProcessErrorActor {
                 async {
                     tokio::select! {
                         _ = interval.tick() => {
-                            let current_errs = Self::read_process_errors();
+                            let current_errs = Self::read_process_errors().await;
                             if current_errs != self.last_value {
                                 self.last_value = current_errs;
                                 let _ = self.sender.send(InteroceptiveSignal::ProcessError(current_errs)).await;
@@ -52,11 +57,19 @@ impl ProcessErrorActor {
         }
     }
 
-    fn read_process_errors() -> u32 {
-        let val = 0;
+    async fn read_process_errors() -> u32 {
         let pid = std::process::id();
         assert!(pid > 0);
-        assert!(val == 0);
-        val
+        let path = std::path::Path::new("/memory/stimulus/physical.json");
+        if !path.is_file() {
+            return 0;
+        }
+        if let Ok(content) = tokio::fs::read_to_string(path).await {
+            if let Ok(stimulus) = serde_json::from_str::<PhysicalStimulus>(&content) {
+                assert!(stimulus.process_error <= 100_000);
+                return stimulus.process_error;
+            }
+        }
+        0
     }
 }

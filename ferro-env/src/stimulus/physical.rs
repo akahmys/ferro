@@ -3,7 +3,7 @@ use rand::Rng;
 use std::time::SystemTime;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::time::{sleep, Duration, timeout};
+use tokio::time::{sleep, Duration};
 use crate::config::stimulus_dir;
 use crate::utils::write_atomic;
 
@@ -69,15 +69,15 @@ pub async fn run_loop(complexity: Arc<RwLock<f64>>) {
     loop {
         assert!(ticks < 10_000_000, "Too many physical ticks");
         ticks += 1;
-        let limit = Duration::from_millis(2000);
-        let res = timeout(limit, async {
-            let current_complexity = *complexity.read().await;
-            let data = generate_physical(current_complexity);
-            let json = serde_json::to_vec(&data).unwrap_or_default();
-            let path = stimulus_dir().join("physical.json");
-            let _ = write_atomic(&path, &json).await;
+        if crate::stimulus::is_dripper_active() {
             sleep(Duration::from_millis(1000)).await;
-        }).await;
-        if res.is_err() { break; }
+            continue;
+        }
+        let current_complexity = *complexity.read().await;
+        let data = generate_physical(current_complexity);
+        let json = serde_json::to_vec(&data).unwrap_or_default();
+        let path = stimulus_dir().join("physical.json");
+        let _ = write_atomic(&path, &json).await;
+        sleep(Duration::from_millis(1000)).await;
     }
 }

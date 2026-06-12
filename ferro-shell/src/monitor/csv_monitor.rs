@@ -8,11 +8,20 @@ use crate::monitor::stats::SurpriseStats;
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct EpisodeRecord {
     pub timestamp: u64,
+    #[serde(alias = "episode_id", alias = "event_id")]
     pub episode_id: String,
+    #[serde(alias = "target_cluster_id", alias = "origin_cluster_id")]
     pub target_cluster_id: String,
+    #[serde(alias = "raw_surprise", alias = "surprise_level")]
     pub raw_surprise: f64,
+    #[serde(default)]
     pub context_hash: String,
+    #[serde(default)]
     pub payload: String,
+    #[serde(default)]
+    pub sensory_summary: String,
+    #[serde(default)]
+    pub motor_summary: String,
 }
 
 /// Monitor for parsing new rows in `episodic_buffer.csv` incrementally.

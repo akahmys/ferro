@@ -9,6 +9,11 @@ pub struct RamFreeActor {
     pub check_interval_ms: u64,
 }
 
+#[derive(serde::Deserialize, Debug, Clone)]
+struct PhysicalStimulus {
+    ram_free: u64,
+}
+
 impl RamFreeActor {
     pub fn new(sender: Sender<InteroceptiveSignal>, last_value: u64, check_interval_ms: u64) -> Self {
         assert!(check_interval_ms > 0);
@@ -32,7 +37,7 @@ impl RamFreeActor {
                 async {
                     tokio::select! {
                         _ = interval.tick() => {
-                            let current_free = Self::read_system_free_memory();
+                            let current_free = Self::read_system_free_memory().await;
                             if current_free != self.last_value {
                                 self.last_value = current_free;
                                 let _ = self.sender.send(InteroceptiveSignal::RamFree(current_free)).await;
@@ -52,11 +57,19 @@ impl RamFreeActor {
         }
     }
 
-    fn read_system_free_memory() -> u64 {
-        let mem = 1024 * 1024 * 1024;
+    async fn read_system_free_memory() -> u64 {
         let pid = std::process::id();
         assert!(pid > 0);
-        assert!(mem < 10_000_000_000_000);
-        mem
+        let path = std::path::Path::new("/memory/stimulus/physical.json");
+        if !path.is_file() {
+            return 1024 * 1024 * 1024;
+        }
+        if let Ok(content) = tokio::fs::read_to_string(path).await {
+            if let Ok(stimulus) = serde_json::from_str::<PhysicalStimulus>(&content) {
+                assert!(stimulus.ram_free > 0);
+                return stimulus.ram_free;
+            }
+        }
+        1024 * 1024 * 1024
     }
 }

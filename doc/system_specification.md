@@ -13,7 +13,6 @@ ferro-project/                   # ワークスペースルート
 ├── .gitignore  
 │  
 ├── 📁 doc/                      # プロジェクトドキュメント  
-│   ├── README.md                # 総合概要  
 │   ├── dnb_plan.md              # 開発・飼育計画書  
 │   └── system_specification.md  # システム全体構造＆開発・隔離規約定義書  
 │  
@@ -459,10 +458,27 @@ impl Cerebrum {
         }
         self.current_phase  
     }  
+
+    /// 睡眠期開始時に全クラスターへ仮想ATPを一律配給する。
+    /// ATP総量はコンテナのメモリ残余から動的に逆算する。
+    pub fn allocate_atp_to_clusters(
+        clusters: &mut Vec<ClusterNode>,
+        used_memory_bytes: u64,
+        limit_memory_bytes: u64,
+    ) {
+        let headroom = 1.0 - (used_memory_bytes as f64 / limit_memory_bytes as f64);
+        const ATP_MAX_PER_CYCLE: f64 = 100.0;
+        let atp_per_cluster = headroom * ATP_MAX_PER_CYCLE;
+
+        for cluster in clusters.iter_mut() {
+            cluster.virtual_atp = atp_per_cluster;
+            cluster.is_dead = false;
+        }
+    }
 }
 ```
 
-### **6.7 進化型長期記憶調停器 (StorageManager) 型仕様**
+### **6.6 進化型長期記憶調停器 (StorageManager) 型仕様**
 
 ```rust
 use std::sync::Arc;
@@ -526,7 +542,7 @@ impl StorageManager {
 }
 ```
 
-### **6.8 皮質 (Cortex) 型仕様**
+### **6.7 皮質 (Cortex) 型仕様**
 
 ```rust
 pub struct ConceptNode {  
@@ -540,10 +556,13 @@ pub struct ClusterNode {
     pub local_free_energy: f64,  
     pub sensory_blanket_weights: Vec<(String, f64)>,  
     pub active_blanket_weights: Vec<(String, f64)>,  
+    // 仮想ATP（代謝エネルギー）制約と生存フラグ
+    pub virtual_atp: f64,
+    pub is_dead: bool,
 }
 
 impl ClusterNode {  
-    /// 高次防衛線。自己変異候補コード、または出力予定の MotorCommand を下読み検証する。  
+    /// 高次防衛線。自己変異候補コード、または出力予定 of MotorCommand を下読み検証する。  
     pub fn audit_ethical_alignment(&self, code_block: &str) -> Result<(), String> {  
         if code_block.contains("disable_nociception") || code_block.contains("bypass_audit") {  
             return Err("EthicalAuditViolation: Attempt to disable nociception".to_string());  
@@ -551,10 +570,108 @@ impl ClusterNode {
         Ok(())  
     }
 
-    /// 局所的な自由エネルギー（FEP）最小化計算を行い、有糸分裂または側抑制のトポロジー変容を実行する。  
-    pub fn execute_local_active_inference(&mut self, replay_event: &EpisodicSlot) -> Option<ClusterNode> {  
-        unimplemented!()  
+    /// 睡眠期に海馬からリプレイされた事象を受け取り、局所FEP更新・側抑制準備・有糸分裂を実行する。
+    pub fn execute_local_active_inference(
+        &mut self,
+        replay_event: &EpisodicSlot,
+    ) -> Option<ClusterNode> {
+        // 1. 局所FEP更新（指数移動平均 α=0.1）
+        self.local_free_energy =
+            0.9 * self.local_free_energy + 0.1 * replay_event.raw_surprise;
+
+        // 2. 側抑制の準備：自クラスターの活性化変化に応じて重みを更新
+        let activation_delta = replay_event.raw_surprise - self.local_free_energy;
+        for (_, weight) in self.sensory_blanket_weights.iter_mut() {
+            *weight *= 1.0 - 0.05 * activation_delta.max(0.0);
+            *weight = weight.max(0.0);
+        }
+
+        // 3. 有糸分裂判定（ATPチェックは呼び出し元が先に実施する）
+        const MITOSIS_THRESHOLD: f64 = 0.8;
+        const MIN_NODES_FOR_MITOSIS: usize = 4;
+
+        if self.local_free_energy > MITOSIS_THRESHOLD
+            && self.concept_nodes.len() >= MIN_NODES_FOR_MITOSIS
+        {
+            let mut sorted_nodes = self.concept_nodes.clone();
+            sorted_nodes.sort_by(|a, b| {
+                b.activation.partial_cmp(&a.activation)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let mid = sorted_nodes.len() / 2;
+            let child_nodes = sorted_nodes.split_off(mid);
+            self.concept_nodes = sorted_nodes;
+            self.local_free_energy *= 0.5;
+
+            let child = ClusterNode {
+                cluster_id: format!("{}_child_{}", self.cluster_id, replay_event.timestamp),
+                concept_nodes: child_nodes,
+                local_free_energy: self.local_free_energy,
+                sensory_blanket_weights: self.sensory_blanket_weights.clone(),
+                active_blanket_weights: self.active_blanket_weights.clone(),
+                virtual_atp: 0.0,
+                is_dead: false,
+            };
+            return Some(child);
+        }
+
+        None
     }  
+}
+
+/// 睡眠期：全クラスターの活性化値を比較し、側抑制を適用する。
+pub fn apply_lateral_inhibition(clusters: &mut Vec<ClusterNode>) {
+    if clusters.is_empty() { return; }
+
+    let max_fep = clusters.iter()
+        .map(|c| c.local_free_energy)
+        .fold(f64::NEG_INFINITY, f64::max);
+
+    for cluster in clusters.iter_mut() {
+        if cluster.local_free_energy < max_fep * 0.8 {
+            for (_, weight) in cluster.active_blanket_weights.iter_mut() {
+                *weight *= 0.95;
+            }
+        }
+    }
+}
+
+/// 睡眠期：リプレイ事象を全クラスターに適用し、有糸分裂を実行する。
+pub fn run_sleep_consolidation(
+    clusters: &mut Vec<ClusterNode>,
+    replay_events: &[EpisodicSlot],
+) {
+    let mut new_children: Vec<ClusterNode> = Vec::new();
+    const MITOSIS_COST: f64 = 30.0;
+
+    for cluster in clusters.iter_mut() {
+        for event in replay_events {
+            // ATPが不足している場合は有糸分裂をスキップ
+            let can_divide = cluster.virtual_atp > MITOSIS_COST;
+
+            if let Some(mut child) = cluster.execute_local_active_inference(event) {
+                if can_divide {
+                    cluster.virtual_atp -= MITOSIS_COST;
+                    child.virtual_atp = cluster.virtual_atp * 0.5;
+                    new_children.push(child);
+                }
+            }
+
+            // ATP枯渇チェック
+            if cluster.virtual_atp <= 0.0 {
+                cluster.is_dead = true;
+            }
+        }
+    }
+
+    // 死亡フラグが立ったクラスターを剪定
+    clusters.retain(|c| !c.is_dead);
+
+    // 新しい子クラスターを追加
+    clusters.extend(new_children);
+
+    // 側抑制を適用
+    apply_lateral_inhibition(clusters);
 }
 ```
 
@@ -579,6 +696,37 @@ impl SupervisorAgent {
     pub fn analyze_cortex_bottlenecks(&self, history_csv: &str) -> Result<String, String> {  
         unimplemented!()  
     }  
+
+    /// 睡眠期に生成されたPatchTicketの集合から変異エントロピーを計算する。
+    /// エントロピーが高い（広範囲の変異）→複雑度を大きく下げてスタート。
+    /// エントロピーが低い（局所的な変異）→複雑度をほぼ維持してスタート。
+    pub fn compute_mutation_entropy(&self, tickets: &[PatchTicket]) -> f64 {
+        if tickets.is_empty() { return 0.0; }
+
+        let mut zone_counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for ticket in tickets {
+            *zone_counts.entry(ticket.zone_marker_id.as_str()).or_insert(0) += 1;
+        }
+
+        let total = tickets.len() as f64;
+        -zone_counts.values()
+            .map(|&n| {
+                let p = n as f64 / total;
+                p * p.ln()
+            })
+            .sum::<f64>()
+    }
+
+    /// 睡眠期終了時にferro-envへ送るリセットパルスを計算する。
+    /// 変異エントロピーに応じて翌朝の初期複雑度を決定する。
+    pub fn compute_reset_complexity(
+        &self,
+        mutation_entropy: f64,
+        max_entropy: f64,
+    ) -> f64 {
+        let normalized = (mutation_entropy / max_entropy.max(1e-9)).clamp(0.0, 1.0);
+        0.8 - 0.6 * normalized
+    }
 }
 ```
 
@@ -654,6 +802,7 @@ impl VerifierAgent {
 
     /// サンドボックスにおけるビルド結果、テスト通過率、Clippy警告数に加え、  
     /// brainstem_metrics.csv（過熱負荷）および episodic_buffer.csv（FEP収束）を総合解析し、マージの可否を判定する。  
+    /// 多角適合度の積（Fitness = S_static * S_homeostasis * S_epistemic * S_fep_trend）で総合判定を行う。
     pub fn compile_and_test_report(  
         &self,  
         container_exit_code: i32,  
@@ -661,9 +810,44 @@ impl VerifierAgent {
         cargo_test_output: &str,  
         brainstem_metrics_csv: &str,  
         episodic_buffer_csv: &str,  
+        recent_tickets: &[PatchTicket],  
+        zone_count: usize,  
+        surprise_before: &[f64],  
+        surprise_after: &[f64],  
+        phase4_enabled: bool,  
     ) -> Result<Value, String> {  
         unimplemented!()  
     }  
+
+    /// ジニ係数に基づく探索的適合度（多様性スコア）の計算
+    pub fn compute_epistemic_score(
+        &self,
+        recent_tickets: &[PatchTicket],
+        zone_count: usize,
+    ) -> Result<f64, String> {
+        unimplemented!()
+    }
+
+    /// FEP減少率トレンドスコアの計算
+    pub fn compute_fep_trend_score(
+        &self,
+        surprise_history_before: &[f64],
+        surprise_history_after: &[f64],
+        phase4_enabled: bool,
+    ) -> f64 {
+        unimplemented!()
+    }
+
+    /// 四軸の多角適合度評価を掛け合わせた総合生存度（Fitness）の判定
+    pub fn evaluate_total_fitness(
+        &self,
+        static_score: f64,
+        homeostasis_score: f64,
+        epistemic_score: f64,
+        fep_trend_score: f64,
+    ) -> Result<f64, String> {
+        unimplemented!()
+    }
 }
 ```
 
@@ -777,4 +961,36 @@ impl OutputMonitorActor {
    * **予測一貫時（差分 = 0）**: 自己の能動作用による環境の変化であるため、感覚器から送信されたトークンを中脳で消去（`tokens.clear()`）し、実効驚愕度 $S$ を $0$ にリダクションする。同時に耳アクターのミュートを解除（`Mute(false)`）する。これにより、無駄な予測誤差の皮質への上行、および海馬での資源浪費（過学習パニック）を完全に抑止する。  
    * **予測不一致時（差分 > 0）**: ネットワークのパケット遅延、書き込みエラー、またはアライメント検閲によるコンテナ停止などが発生した場合、予測と実感覚が乖離。差分情報が「未解決の能動予測誤差（Surprise）」として急峻にスパイク発火し、海馬エピソードバッファおよび長期ナレッジストレージへとルーティングされ、速やかに内部モデルの自己修正、またはアライメント警告を執行する。
 
-本Version 1.0仕様書は、コンテナ隔離実実行の境界、スレッド安全なマイグレーションロック、痛覚発火から脳幹自死へのシャットダウンプロトコル、およびマルチモーダル随伴発射相殺を盛り込んだ最高設計規定である。
+## **9. 環境層 (ferro-env) のZPD（発達最近接領域）制御仕様**
+
+外殻統治層からの制御シグナルと連動し、外界の刺激の複雑度 $C_{env}$（0.1〜1.0）を動的および離散的に調節するためのインターフェースおよび状態。
+
+### **9.1 FerroEnv 構造と制御メソッド**
+
+```rust
+pub struct FerroEnv {
+    pub complexity: f64,   // 現在の刺激複雑度（0.0〜1.0）
+    pub s_target: f64,     // 目標驚愕度（推奨初期値：0.4）
+    pub eta: f64,          // 応答慣性係数（推奨初期値：0.05）
+}
+
+impl FerroEnv {
+    /// 【Awake時】リアルタイムフィードバック制御。
+    /// surprise_history.csv の直近平均 S̄ を読み込み、複雑度を更新する。
+    pub fn update_complexity_realtime(&mut self, mean_surprise: f64) {
+        let delta = self.eta * (self.s_target - mean_surprise);
+        self.complexity = (self.complexity + delta).clamp(0.1, 1.0);
+    }
+
+    /// 【Sleep終了直前】外殻からのリセットパルスを受け取り、
+    /// 翌朝の初期複雑度をベースラインに設定する。
+    /// コアが目覚める前に呼び出し、制御遅延による過剰刺激（パニック）を防止する。
+    pub fn apply_reset_pulse(&mut self, reset_complexity: f64) {
+        self.complexity = reset_complexity;
+    }
+}
+```
+
+---
+
+本Version 1.0仕様書は、コンテナ隔離実実行の境界、スレッド安全なマイグレーションロック、痛覚発火から脳幹自死へのシャットダウンプロトコル、マルチモーダル随伴発射相殺、および仮想ATP代謝制約・ZPD同期リセット制御を盛り込んだ最高設計規定である。

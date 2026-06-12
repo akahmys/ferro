@@ -22,16 +22,12 @@ async fn run_zpd_monitor(complexity: Arc<RwLock<f64>>) {
     let comp_clone = Arc::clone(&complexity);
     tokio::spawn(async move {
         loop {
-            let limit = Duration::from_millis(2000);
-            let res = timeout(limit, async {
-                let next_level = read_zpd_complexity().await;
-                {
-                    let mut lock = comp_clone.write().await;
-                    *lock = next_level;
-                }
-                sleep(Duration::from_millis(1000)).await;
-            }).await;
-            if res.is_err() { break; }
+            let next_level = read_zpd_complexity().await;
+            {
+                let mut lock = comp_clone.write().await;
+                *lock = next_level;
+            }
+            sleep(Duration::from_millis(1000)).await;
         }
     });
     
@@ -46,13 +42,9 @@ async fn run_realtime_zpd_adjuster(complexity: Arc<RwLock<f64>>) {
         let surprise_csv = crate::config::base_dir().join("surprise_history.csv");
         let zpd_json = crate::config::zpd_control_path();
         loop {
-            let limit = Duration::from_millis(6000);
-            let res = timeout(limit, async {
-                let cur = { *comp_clone.read().await };
-                let _ = crate::zpd::update_complexity_realtime(&surprise_csv, &zpd_json, cur).await;
-                sleep(Duration::from_millis(5000)).await;
-            }).await;
-            if res.is_err() { break; }
+            let cur = { *comp_clone.read().await };
+            let _ = crate::zpd::update_complexity_realtime(&surprise_csv, &zpd_json, cur).await;
+            sleep(Duration::from_millis(5000)).await;
         }
     });
     let active = Arc::strong_count(&complexity) >= 1;
@@ -70,6 +62,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (echo_tx, echo_rx) = mpsc::unbounded_channel::<ProprioceptiveEcho>();
 
     start_dripping(Arc::clone(&complexity), feedback_rx, echo_rx).await;
+    
+    let feedback_tx_clone = feedback_tx.clone();
+    let base_path = crate::config::base_dir();
+    tokio::spawn(async move {
+        crate::stimulus::user_input::run_user_input_listener(feedback_tx_clone, &base_path).await;
+    });
+
     start_receiver(feedback_tx, echo_tx).await;
     run_zpd_monitor(Arc::clone(&complexity)).await;
     run_realtime_zpd_adjuster(Arc::clone(&complexity)).await;

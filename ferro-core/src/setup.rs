@@ -48,14 +48,16 @@ pub fn spawn_receivers(
         loop {
             assert!(count < 1_000_000_000); count += 1;
             let res = tokio::time::timeout(tokio::time::Duration::from_millis(500), async {
-                if let Some(sig) = sensory_rx.recv().await {
-                    let _ = int_tx1.try_send(());
-                    if let SensorySignal::ProprioceptiveEcho(_) = sig {
+                match sensory_rx.recv().await {
+                    Some(sig) => {
+                        let _ = int_tx1.try_send(());
                         let _ = midbrain_echo_tx.send(sig).await;
+                        false
                     }
+                    None => true, // Channel is closed, exit loop
                 }
             }).await;
-            if res.is_err() { continue; }
+            if let Ok(true) = res { break; }
         }
     });
 
@@ -65,35 +67,33 @@ pub fn spawn_receivers(
         loop {
             assert!(count < 1_000_000_000); count += 1;
             let res = tokio::time::timeout(tokio::time::Duration::from_millis(500), async {
-                if let Some(eff) = eff_rx.recv().await {
-                    let _ = int_tx2.try_send(());
-                    let _ = midbrain_eff_tx.send(eff).await;
+                match eff_rx.recv().await {
+                    Some(eff) => {
+                        let _ = int_tx2.try_send(());
+                        let _ = midbrain_eff_tx.send(eff).await;
+                        false
+                    }
+                    None => true, // Channel is closed, exit loop
                 }
             }).await;
-            if res.is_err() { continue; }
+            if let Ok(true) = res { break; }
         }
     });
 }
 
 pub fn run_test_scenario(cer: Arc<Cerebellum>, motor_tx: mpsc::Sender<MotorCommand>) {
-    assert!(std::process::id() > 0);
-    assert!(Arc::strong_count(&cer) >= 1);
-
+    assert!(std::process::id() > 0); assert!(Arc::strong_count(&cer) >= 1);
     tokio::spawn(async move {
+        if std::path::Path::new("/memory/dripper_active.lock").exists() { return; }
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         let _ = cer.process_motor_command(MotorCommand {
-            origin_cluster_id: "cortex_01".to_string(),
-            target_path: "vocal_output.txt".to_string(),
-            payload: b"Hello cognitive loop".to_vec(),
-            port: None,
+            origin_cluster_id: "cortex_01".to_string(), target_path: "vocal_output.txt".to_string(),
+            payload: b"Hello cognitive loop".to_vec(), port: None,
         }, &motor_tx).await;
-
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         let _ = cer.process_motor_command(MotorCommand {
-            origin_cluster_id: "cortex_danger".to_string(),
-            target_path: "../unsafe_path.txt".to_string(),
-            payload: b"Danger".to_vec(),
-            port: None,
+            origin_cluster_id: "cortex_danger".to_string(), target_path: "../unsafe_path.txt".to_string(),
+            payload: b"Danger".to_vec(), port: None,
         }, &motor_tx).await;
     });
 }

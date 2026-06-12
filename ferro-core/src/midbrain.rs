@@ -13,20 +13,9 @@ pub struct Midbrain {
 }
 
 impl Midbrain {
-    pub fn new(
-        efference_rx: mpsc::Receiver<EfferenceCopy>,
-        echo_rx: mpsc::Receiver<SensorySignal>,
-        mute_tx: broadcast::Sender<SensoryMuteCommand>,
-        surprise_tx: mpsc::Sender<f32>,
-        match_window_ms: u64,
-        max_pending: usize,
-    ) -> Self {
+    pub fn new(efference_rx: mpsc::Receiver<EfferenceCopy>, echo_rx: mpsc::Receiver<SensorySignal>, mute_tx: broadcast::Sender<SensoryMuteCommand>, surprise_tx: mpsc::Sender<f32>, match_window_ms: u64, max_pending: usize) -> Self {
         assert!(match_window_ms > 0); assert!(max_pending > 0);
-        Self {
-            efference_rx, echo_rx, mute_tx, surprise_tx,
-            pending_efference: VecDeque::with_capacity(max_pending),
-            match_window_ms, max_pending,
-        }
+        Self { efference_rx, echo_rx, mute_tx, surprise_tx, pending_efference: VecDeque::with_capacity(max_pending), match_window_ms, max_pending }
     }
 
     pub async fn run_loop(mut self, mut kill_rx: broadcast::Receiver<BrainstemCommand>) {
@@ -47,36 +36,43 @@ impl Midbrain {
 
     pub(crate) async fn handle_efference_copy(&mut self, eff: EfferenceCopy) {
         assert!(!eff.origin_cluster_id.is_empty()); assert!(self.max_pending > 0);
-        if self.pending_efference.len() >= self.max_pending {
-            let _ = self.pending_efference.pop_front();
-        }
+        if self.pending_efference.len() >= self.max_pending { let _ = self.pending_efference.pop_front(); }
         self.pending_efference.push_back(eff);
         let _ = self.mute_tx.send(SensoryMuteCommand { mute: true, attenuation_db: -40.0 });
     }
 
     pub(crate) async fn handle_sensory_echo(&mut self, signal: SensorySignal) {
-        if let SensorySignal::ProprioceptiveEcho(tokens) = signal {
-            assert!(!tokens.is_empty()); assert!(self.match_window_ms > 0);
-            let mut matched = false;
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs()).unwrap_or(0);
-            let mut match_idx = None;
-            for (idx, eff) in self.pending_efference.iter().enumerate() {
-                let time_diff = now.saturating_sub(eff.timestamp);
-                if time_diff <= self.match_window_ms / 1000 && eff.expected_tokens == tokens {
-                    matched = true;
-                    match_idx = Some(idx);
-                    break;
+        match signal {
+            SensorySignal::ProprioceptiveEcho(tokens) => {
+                assert!(!tokens.is_empty()); assert!(self.match_window_ms > 0);
+                let mut matched = false;
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                let mut match_idx = None;
+                for (idx, eff) in self.pending_efference.iter().enumerate() {
+                    let time_diff = now.saturating_sub(eff.timestamp);
+                    if time_diff <= self.match_window_ms / 1000 && eff.expected_tokens == tokens {
+                        matched = true; match_idx = Some(idx); break;
+                    }
                 }
+                let surprise = if matched {
+                    if let Some(i) = match_idx { let _ = self.pending_efference.remove(i); }
+                    0.0
+                } else {
+                    1.0
+                };
+                let _ = self.surprise_tx.send(surprise).await;
+                let _ = self.mute_tx.send(SensoryMuteCommand { mute: false, attenuation_db: 0.0 });
             }
-            let surprise = if matched {
-                if let Some(i) = match_idx { let _ = self.pending_efference.remove(i); }
-                0.0
-            } else {
-                1.0
-            };
-            let _ = self.surprise_tx.send(surprise).await;
-            let _ = self.mute_tx.send(SensoryMuteCommand { mute: false, attenuation_db: 0.0 });
+            SensorySignal::FrameDelta(delta) => {
+                assert!(self.match_window_ms > 0);
+                let surprise = (delta as f32).min(1.0);
+                if surprise > 0.01 { let _ = self.surprise_tx.send(surprise).await; }
+            }
+            SensorySignal::SpeechToken(tokens) => {
+                assert!(self.match_window_ms > 0);
+                if !tokens.is_empty() { let _ = self.surprise_tx.send(0.3).await; }
+            }
+            _ => {}
         }
     }
 }

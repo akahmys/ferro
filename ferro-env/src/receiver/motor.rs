@@ -1,6 +1,6 @@
 use tokio::fs;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::time::{sleep, Duration, timeout, Instant};
+use tokio::time::{sleep, Duration, Instant};
 use crate::config::{action_dir, base_dir};
 use crate::receiver::ProprioceptiveEcho;
 use crate::receiver::text_processor::{VocalTextAction, handle_vocal_text, extract_tokens};
@@ -24,45 +24,42 @@ pub async fn start_receiver(
         let (mut last_text_ts, mut last_audio_ts) = (0i64, 0i64);
         let mut state: Option<CoalesceState> = None;
         loop {
-            let step = timeout(Duration::from_millis(50), async {
-                if text_path.exists() {
-                    if let Ok(c) = fs::read_to_string(&text_path).await {
-                        if let Ok(act) = serde_json::from_str::<VocalTextAction>(&c) {
-                            if act.timestamp > last_text_ts {
-                                last_text_ts = act.timestamp;
-                                state = Some(update_state(state.take(), Some(act), None));
-                            } else if act.timestamp < last_text_ts && act.timestamp > 0 {
-                                println!("[ferro-env] Core text timestamp reset detected ({} -> {}). Re-syncing.", last_text_ts, act.timestamp);
-                                last_text_ts = act.timestamp;
-                                state = Some(update_state(state.take(), Some(act), None));
-                            }
+            if text_path.exists() {
+                if let Ok(c) = fs::read_to_string(&text_path).await {
+                    if let Ok(act) = serde_json::from_str::<VocalTextAction>(&c) {
+                        if act.timestamp > last_text_ts {
+                            last_text_ts = act.timestamp;
+                            state = Some(update_state(state.take(), Some(act), None));
+                        } else if act.timestamp < last_text_ts && act.timestamp > 0 {
+                            println!("[ferro-env] Core text timestamp reset detected ({} -> {}). Re-syncing.", last_text_ts, act.timestamp);
+                            last_text_ts = act.timestamp;
+                            state = Some(update_state(state.take(), Some(act), None));
                         }
                     }
                 }
-                if audio_path.exists() {
-                    if let Ok(c) = fs::read_to_string(&audio_path).await {
-                        if let Ok(act) = serde_json::from_str::<VocalAudioAction>(&c) {
-                            if act.timestamp > last_audio_ts {
-                                last_audio_ts = act.timestamp;
-                                state = Some(update_state(state.take(), None, Some(act)));
-                            } else if act.timestamp < last_audio_ts && act.timestamp > 0 {
-                                println!("[ferro-env] Core audio timestamp reset detected ({} -> {}). Re-syncing.", last_audio_ts, act.timestamp);
-                                last_audio_ts = act.timestamp;
-                                state = Some(update_state(state.take(), None, Some(act)));
-                            }
+            }
+            if audio_path.exists() {
+                if let Ok(c) = fs::read_to_string(&audio_path).await {
+                    if let Ok(act) = serde_json::from_str::<VocalAudioAction>(&c) {
+                        if act.timestamp > last_audio_ts {
+                            last_audio_ts = act.timestamp;
+                            state = Some(update_state(state.take(), None, Some(act)));
+                        } else if act.timestamp < last_audio_ts && act.timestamp > 0 {
+                            println!("[ferro-env] Core audio timestamp reset detected ({} -> {}). Re-syncing.", last_audio_ts, act.timestamp);
+                            last_audio_ts = act.timestamp;
+                            state = Some(update_state(state.take(), None, Some(act)));
                         }
                     }
                 }
-                if let Some(s) = state.take() {
-                    if (s.text_action.is_some() && s.audio_action.is_some()) || Instant::now() >= s.window_end {
-                        process_coalesced(s, &feedback_tx, &echo_tx, &log_path).await;
-                    } else {
-                        state = Some(s);
-                    }
+            }
+            if let Some(s) = state.take() {
+                if (s.text_action.is_some() && s.audio_action.is_some()) || Instant::now() >= s.window_end {
+                    process_coalesced(s, &feedback_tx, &echo_tx, &log_path).await;
+                } else {
+                    state = Some(s);
                 }
-                sleep(Duration::from_millis(2)).await;
-            }).await;
-            if step.is_err() { break; }
+            }
+            sleep(Duration::from_millis(2)).await;
         }
     });
 }

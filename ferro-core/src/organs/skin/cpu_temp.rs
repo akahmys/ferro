@@ -9,6 +9,11 @@ pub struct CpuTempActor {
     pub check_interval_ms: u64,
 }
 
+#[derive(serde::Deserialize, Debug, Clone)]
+struct PhysicalStimulus {
+    cpu_temp: f32,
+}
+
 impl CpuTempActor {
     pub fn new(sender: Sender<InteroceptiveSignal>, last_value: f32, check_interval_ms: u64) -> Self {
         assert!(check_interval_ms > 0);
@@ -32,7 +37,7 @@ impl CpuTempActor {
                 async {
                     tokio::select! {
                         _ = interval.tick() => {
-                            let current_temp = Self::read_system_cpu_temp();
+                            let current_temp = Self::read_system_cpu_temp().await;
                             if (current_temp - self.last_value).abs() > 0.1 {
                                 self.last_value = current_temp;
                                 let _ = self.sender.send(InteroceptiveSignal::CpuTemp(current_temp)).await;
@@ -52,11 +57,19 @@ impl CpuTempActor {
         }
     }
     
-    fn read_system_cpu_temp() -> f32 {
-        let val = 45.0;
+    async fn read_system_cpu_temp() -> f32 {
         let pid = std::process::id();
         assert!(pid > 0);
-        assert!(val < 100.0);
-        val
+        let path = std::path::Path::new("/memory/stimulus/physical.json");
+        if !path.is_file() {
+            return 45.0;
+        }
+        if let Ok(content) = tokio::fs::read_to_string(path).await {
+            if let Ok(stimulus) = serde_json::from_str::<PhysicalStimulus>(&content) {
+                assert!(stimulus.cpu_temp >= 0.0);
+                return stimulus.cpu_temp;
+            }
+        }
+        45.0
     }
 }

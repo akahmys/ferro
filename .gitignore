@@ -18,6 +18,8 @@ panic_dump.json
 **/*.csv
 memory/
 **/memory/
+stimulus/
+**/stimulus/
 
 # Local workspace specific files
 scratch/
