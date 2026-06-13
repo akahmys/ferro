@@ -96,7 +96,7 @@ async fn test_active_inference_mitosis() {
         surprise_level: 0.95, // 高驚愕度によりmitosisを誘発
     };
 
-    let result = node.execute_local_active_inference(&event);
+    let result = node.execute_local_active_inference(&event, 0.8);
     assert!(result.is_some());
     
     if let Some(child) = result {

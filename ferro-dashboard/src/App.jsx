@@ -227,7 +227,7 @@ export default function App() {
             y: py,
             vx: 0,
             vy: 0,
-            radius: Math.random() * 6 + 8,
+            radius: Math.random() * 4 + 6,
             activation: Math.random(),
             pulseRate: 0.05 + Math.random() * 0.05,
             pulseTime: Math.random() * 10
@@ -249,9 +249,11 @@ export default function App() {
 
     // Main animation & physics loop
     const updatePhysics = () => {
-      const kRepulsion = 180;
-      const kGravity = 0.03;
-      const kLink = 0.08;
+      const nodeCount = phys.nodes.length;
+      // Softened repulsion parameters to prevent infinite force at short distances
+      const kRepulsion = Math.max(250, 900 - nodeCount * 2);
+      const kGravity = 0.015;
+      const kLink = 0.04;
       const linkLength = 80;
 
       // Apply forces
@@ -262,6 +264,13 @@ export default function App() {
         n1.vx += (canvas.width / 2 - n1.x) * kGravity;
         n1.vy += (canvas.height / 2 - n1.y) * kGravity;
 
+        // Push away from canvas boundaries to prevent clustering in corners (soft boundaries)
+        const pad = 40;
+        if (n1.x < pad) n1.vx += (pad - n1.x) * 0.05;
+        if (n1.x > canvas.width - pad) n1.vx -= (n1.x - (canvas.width - pad)) * 0.05;
+        if (n1.y < pad) n1.vy += (pad - n1.y) * 0.05;
+        if (n1.y > canvas.height - pad) n1.vy -= (n1.y - (canvas.height - pad)) * 0.05;
+
         // Repulsion between nodes
         for (let j = i + 1; j < phys.nodes.length; j++) {
           const n2 = phys.nodes[j];
@@ -269,7 +278,8 @@ export default function App() {
           const dy = n2.y - n1.y;
           const dist = Math.hypot(dx, dy) || 1;
           if (dist < 220) {
-            const force = kRepulsion / (dist * dist);
+            // Added 300 as a softening factor (epsilon) to avoid near-zero division explosion
+            const force = kRepulsion / (dist * dist + 300);
             n1.vx -= (dx / dist) * force;
             n1.vy -= (dy / dist) * force;
             n2.vx += (dx / dist) * force;
@@ -295,12 +305,12 @@ export default function App() {
         }
       });
 
-      // Update positions and velocities with friction
+      // Update positions and velocities with strong friction to guarantee settling
       phys.nodes.forEach(n => {
         n.x += n.vx;
         n.y += n.vy;
-        n.vx *= 0.85;
-        n.vy *= 0.85;
+        n.vx *= 0.70; // Increased friction from 0.85 to 0.70 to quickly suppress energy
+        n.vy *= 0.70;
 
         // Boundaries
         n.x = Math.max(n.radius, Math.min(canvas.width - n.radius, n.x));
@@ -572,7 +582,7 @@ export default function App() {
         <div className="lg:col-span-5 flex flex-col gap-4">
           
           {/* Cortex cluster canvas graph */}
-          <div className="glass-panel p-4 flex flex-col h-[280px]">
+          <div className="glass-panel p-4 flex flex-col h-[320px] shrink-0">
             <div className="flex justify-between items-center mb-2">
               <h2 className="text-xs font-semibold text-[#2D2C2A] font-mono flex items-center gap-2">
                 <Shield className="h-4 w-4 text-[#3B9E99]" />

@@ -48,9 +48,12 @@ impl Midbrain {
                 let mut matched = false;
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
                 let mut match_idx = None;
+                let window_secs = (self.match_window_ms + 999) / 1000;
                 for (idx, eff) in self.pending_efference.iter().enumerate() {
                     let time_diff = now.saturating_sub(eff.timestamp);
-                    if time_diff <= self.match_window_ms / 1000 && eff.expected_tokens == tokens {
+                    let tokens_match = !eff.expected_tokens.is_empty() && !tokens.is_empty() &&
+                        eff.expected_tokens.iter().any(|et| tokens.iter().any(|t| t.contains(et) || et.contains(t)));
+                    if time_diff <= window_secs && tokens_match {
                         matched = true; match_idx = Some(idx); break;
                     }
                 }

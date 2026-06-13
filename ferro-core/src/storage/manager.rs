@@ -4,16 +4,20 @@ use tokio::sync::RwLock;
 use crate::cortex::dynamic_cluster::ClusterNode;
 use crate::storage::backend::{
     StorageBackend, count_json_files, write_json_cluster, read_json_cluster,
+    resolve_paths,
 };
 
 pub const CLUSTERS_TABLE: redb::TableDefinition<&str, &[u8]> = redb::TableDefinition::new("clusters");
 
 pub use crate::storage::backend::get_safe_path;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 pub struct StorageManager {
     pub backend: Arc<RwLock<StorageBackend>>,
     pub migration_threshold: usize,
     pub redb_path: PathBuf,
+    pub cached_count: AtomicUsize,
 }
 
 impl StorageManager {
@@ -24,50 +28,40 @@ impl StorageManager {
     ) -> Self {
         let json_path = json_dir.as_ref().to_path_buf();
         let rdb_path = redb_path.as_ref().to_path_buf();
-        assert!(!json_path.as_os_str().is_empty());
-        assert!(!rdb_path.as_os_str().is_empty());
-        assert!(threshold > 0);
-
+        assert!(!json_path.as_os_str().is_empty()); assert!(!rdb_path.as_os_str().is_empty()); assert!(threshold > 0);
+        let initial_count = count_json_files(&json_path);
         Self {
             backend: Arc::new(RwLock::new(StorageBackend::ShardedJson { base_path: json_path })),
-            migration_threshold: threshold,
-            redb_path: rdb_path,
+            migration_threshold: threshold, redb_path: rdb_path,
+            cached_count: AtomicUsize::new(initial_count),
         }
     }
 
     pub async fn write_cluster(&self, node: &ClusterNode) -> Result<(), String> {
-        assert!(!node.cluster_id.is_empty());
-        assert!(node.cluster_id.len() >= 2);
-
+        assert!(!node.cluster_id.is_empty()); assert!(node.cluster_id.len() >= 2);
         let mut should_migrate = false;
-
         {
             let backend_guard = self.backend.read().await;
             match &*backend_guard {
                 StorageBackend::ShardedJson { base_path } => {
+                    let is_new = !resolve_paths(base_path, &node.cluster_id).1.exists();
                     write_json_cluster(base_path, node).await?;
-                    let count = count_json_files(base_path);
+                    if is_new { self.cached_count.fetch_add(1, Ordering::SeqCst); }
+                    let count = self.cached_count.load(Ordering::SeqCst);
                     should_migrate = count >= self.migration_threshold;
                 }
                 StorageBackend::RedbKvs { database, .. } => {
-                    let serialized = serde_json::to_vec(node)
-                        .map_err(|e| e.to_string())?;
-                    let write_txn = database.begin_write()
-                        .map_err(|e| e.to_string())?;
+                    let serialized = serde_json::to_vec(node).map_err(|e| e.to_string())?;
+                    let write_txn = database.begin_write().map_err(|e| e.to_string())?;
                     {
-                        let mut table = write_txn.open_table(CLUSTERS_TABLE)
-                            .map_err(|e| e.to_string())?;
-                        table.insert(node.cluster_id.as_str(), serialized.as_slice())
-                            .map_err(|e| e.to_string())?;
+                        let mut table = write_txn.open_table(CLUSTERS_TABLE).map_err(|e| e.to_string())?;
+                        table.insert(node.cluster_id.as_str(), serialized.as_slice()).map_err(|e| e.to_string())?;
                     }
                     write_txn.commit().map_err(|e| e.to_string())?;
                 }
             }
         }
-
-        if should_migrate {
-            self.trigger_automatic_migration().await?;
-        }
+        if should_migrate { self.trigger_automatic_migration().await?; }
         Ok(())
     }
 

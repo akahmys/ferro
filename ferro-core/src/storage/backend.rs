@@ -7,7 +7,7 @@ pub enum StorageBackend {
 }
 
 pub fn resolve_paths(base_path: &Path, node_id: &str) -> (PathBuf, PathBuf) {
-    assert!(node_id.chars().count() >= 2);
+    assert!(node_id.chars().count() >= 1);
     assert!(!node_id.contains(".."));
 
     let shard_id: String = node_id.chars().take(2).collect();

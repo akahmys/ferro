@@ -82,6 +82,10 @@ def load_book_for_stage(stage):
         filename = "stage_03_grammar.json"
     elif stage == 4:
         filename = "stage_04_qa.json"
+    elif stage == 5:
+        filename = "stage_05_dialogue.json"
+    elif stage == 6:
+        filename = "stage_06_large_corpus.json"
         
     path = os.path.join(BOOKS_DIR, filename)
     if not os.path.exists(path):
@@ -98,12 +102,16 @@ def get_stage_success(stage, fep, clusters):
     elif stage == 3:
         return clusters >= 13 and fep <= 0.05
     elif stage == 4:
-        return fep <= 0.05
+        return clusters >= 15 and fep <= 0.05
+    elif stage == 5:
+        return clusters >= 18 and fep <= 0.05
+    elif stage == 6:
+        return clusters >= 5000 and fep <= 0.05
     return False
 
 def main():
     parser = argparse.ArgumentParser(description="FERRO Cortex Japanese Breeding Book Dripper")
-    parser.add_argument("--stage", type=int, default=None, help="Force starting stage (1-4)")
+    parser.add_argument("--stage", type=int, default=None, help="Force starting stage (1-6)")
     parser.add_argument("--interval", type=int, default=20, help="Dripping interval in seconds")
     parser.add_argument("--auto-advance", type=bool, default=True, help="Auto advance stage on sleep transition")
     args = parser.parse_args()
@@ -135,6 +143,7 @@ def main():
     try:
         page_idx = 0
         last_phase = "Wake"
+        dripped_since_sleep = 0
 
         while True:
             # 1. Monitor phase
@@ -153,7 +162,7 @@ def main():
                 if state["auto_advance"]:
                     success = get_stage_success(current_stage, fep, clusters)
                     print(f"[Dripper] Evaluating Stage {current_stage} success: fep={fep:.4f}, clusters={clusters}, success={success}")
-                    if success and current_stage < 4:
+                    if success and current_stage < 6:
                         next_stage = current_stage + 1
                         next_book = load_book_for_stage(next_stage)
                         if next_book:
@@ -165,7 +174,7 @@ def main():
                         else:
                             print(f"[Dripper] Stage {current_stage} success, but book for Stage {next_stage} is missing. Repeating current stage.")
                     elif success:
-                        print(f"[Dripper] Completed Stage 4 (final stage) successfully!")
+                        print(f"[Dripper] Completed Stage 6 (final stage) successfully!")
                     else:
                         print(f"[Dripper] Stage {current_stage} success criteria not met yet. Remaining on current stage.")
                 
@@ -175,7 +184,7 @@ def main():
                     time.sleep(2)
                     fep, phase = get_latest_fep_and_phase()
                 print("[Dripper] System woke up! Resuming curriculum.")
-                page_idx = 0
+                dripped_since_sleep = 0
 
             last_phase = phase
 
@@ -229,10 +238,12 @@ def main():
 
                 # Advance page and check loop completion
                 page_idx += 1
+                dripped_since_sleep += 1
                 if page_idx >= len(pages):
                     print(f"[Dripper] Finished dripping all {len(pages)} pages of Stage {current_stage} book.")
                     print("[Dripper] Initiating resting period (45s) to allow FERRO to transition to Sleep phase...")
                     page_idx = 0
+                    dripped_since_sleep = 0
                     
                     resting_elapsed = 0
                     check_phase = "Wake"
@@ -248,6 +259,21 @@ def main():
                     
                     if check_phase != "Sleep":
                         print("[Dripper] Resting period completed. FERRO did not enter Sleep yet. Continuing.")
+                elif dripped_since_sleep >= 40:
+                    print(f"[Dripper] Reached {dripped_since_sleep} pages without sleep. Initiating periodic resting period (45s) to consolidate memory...")
+                    dripped_since_sleep = 0
+                    
+                    resting_elapsed = 0
+                    check_phase = "Wake"
+                    while resting_elapsed < 45:
+                        time.sleep(5)
+                        resting_elapsed += 5
+                        _, check_phase = get_latest_fep_and_phase()
+                        if check_phase == "Sleep":
+                            print("[Dripper] FERRO has entered Sleep phase during periodic rest. Proceeding.")
+                            break
+                        if resting_elapsed % 15 == 0:
+                            print(f"[Dripper] Periodic resting... {resting_elapsed}/45s elapsed. FERRO Phase: {check_phase}")
                 else:
                     # Sleep interval, but check phase periodically
                     elapsed = 0

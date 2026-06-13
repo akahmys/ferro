@@ -39,9 +39,10 @@ impl Cerebrum {
         if let Ok(d) = std::fs::metadata(path).and_then(|m| m.modified()).map_err(|_| ()).and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).map_err(|_| ())) {
             last_input = d.as_secs();
         }
+        let fep_threshold = if cur_time.saturating_sub(last_input) > 30 { 0.20 } else { 0.05 };
         let next = if self.current_phase == CognitionPhase::Sleep {
             if self.global_free_energy > 0.10 { CognitionPhase::Wake } else { CognitionPhase::Sleep }
-        } else if cur_time.saturating_sub(last_input) > 30 && self.global_free_energy <= 0.05 && temp < 65.0 {
+        } else if cur_time.saturating_sub(last_input) > 30 && self.global_free_energy <= fep_threshold && temp < 65.0 {
             CognitionPhase::Sleep
         } else {
             CognitionPhase::Wake
@@ -57,7 +58,7 @@ impl Cerebrum {
     pub fn allocate_atp_to_clusters(clusters: &mut [ClusterNode], used: u64, limit: u64) {
         assert!(limit > 0); assert!(used <= limit || used > 0);
         let headroom = 1.0 - (used as f64 / limit as f64).min(1.0);
-        for c in clusters.iter_mut() { c.virtual_atp = headroom * 100.0; c.is_dead = false; }
+        for c in clusters.iter_mut() { c.virtual_atp = (headroom * 100.0).max(1.0); c.is_dead = false; }
     }
 
     pub async fn record_free_energy(&mut self, timestamp: u64, fep: f64) -> Result<(), std::io::Error> {

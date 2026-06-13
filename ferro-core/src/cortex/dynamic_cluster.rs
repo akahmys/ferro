@@ -48,46 +48,46 @@ impl ClusterNode {
     pub fn execute_local_active_inference(
         &mut self,
         replay_event: &EpisodicSlot,
+        mitosis_threshold: f64,
     ) -> Option<ClusterNode> {
         assert!(!replay_event.event_id.is_empty(), "Event ID non-empty check");
         assert!(self.cluster_id.len() >= 2, "Cluster ID valid check");
+        assert!(mitosis_threshold > 0.0, "Mitosis threshold lower limit");
+        assert!(mitosis_threshold < 1.0, "Mitosis threshold upper limit");
 
         // 1. 局所FEP更新（指数移動平均 α=0.1）
-        self.local_free_energy =
-            0.9 * self.local_free_energy + 0.1 * replay_event.surprise_level as f64;
+        self.local_free_energy = 0.9 * self.local_free_energy + 0.1 * replay_event.surprise_level as f64;
+
+        // 1.5. 新しいコンセプトノードの動的挿入・更新
+        let node_id = format!("{}_{}", self.cluster_id, replay_event.event_id);
+        assert!(!node_id.is_empty(), "Node ID validity check");
+        if !self.concept_nodes.iter().any(|n| n.id == node_id) {
+            self.concept_nodes.push(ConceptNode { id: node_id, activation: replay_event.surprise_level as f64 });
+        } else if let Some(n) = self.concept_nodes.iter_mut().find(|n| n.id == node_id) {
+            n.activation = 0.9 * n.activation + 0.1 * replay_event.surprise_level as f64;
+        }
 
         // 2. 側抑制の準備
         let activation_delta = replay_event.surprise_level as f64 - self.local_free_energy;
-        for (_, weight) in self.sensory_blanket_weights.iter_mut() {
-            *weight *= 1.0 - 0.05 * activation_delta.max(0.0);
-            *weight = weight.max(0.0);
+        for (_, w) in self.sensory_blanket_weights.iter_mut() {
+            *w = (*w * (1.0 - 0.05 * activation_delta.max(0.0))).max(0.0);
         }
 
         // 3. 有糸分裂判定
-        const MITOSIS_THRESHOLD: f64 = 0.8;
         const MIN_NODES_FOR_MITOSIS: usize = 4;
-
-        if self.local_free_energy > MITOSIS_THRESHOLD
-            && self.concept_nodes.len() >= MIN_NODES_FOR_MITOSIS
-        {
+        if self.local_free_energy > mitosis_threshold && self.concept_nodes.len() >= MIN_NODES_FOR_MITOSIS {
             let mut sorted_nodes = self.concept_nodes.clone();
-            sorted_nodes.sort_by(|a, b| {
-                b.activation.partial_cmp(&a.activation)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+            sorted_nodes.sort_by(|a, b| b.activation.partial_cmp(&a.activation).unwrap_or(std::cmp::Ordering::Equal));
             let mid = sorted_nodes.len() / 2;
             let child_nodes = sorted_nodes.split_off(mid);
             self.concept_nodes = sorted_nodes;
             self.local_free_energy *= 0.5;
-
             let child = ClusterNode {
                 cluster_id: format!("{}_child_{}", self.cluster_id, replay_event.timestamp),
-                concept_nodes: child_nodes,
-                local_free_energy: self.local_free_energy,
+                concept_nodes: child_nodes, local_free_energy: self.local_free_energy,
                 sensory_blanket_weights: self.sensory_blanket_weights.clone(),
                 active_blanket_weights: self.active_blanket_weights.clone(),
-                virtual_atp: 100.0,
-                is_dead: false,
+                virtual_atp: 100.0, is_dead: false,
             };
             return Some(child);
         }

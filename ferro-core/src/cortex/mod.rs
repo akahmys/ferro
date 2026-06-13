@@ -32,6 +32,8 @@ impl Cortex {
         assert!(!event.origin_cluster_id.is_empty(), "Origin cluster non-empty check");
 
         let cluster_id = &event.origin_cluster_id;
+        let config = load_cortex_config();
+        assert!(config.mitosis_threshold > 0.0, "Mitosis threshold limit in process_replay");
         
         // ストレージからクラスターを読込む（無ければ新規作成）
         let mut cluster = match self.storage.read_cluster(cluster_id).await {
@@ -40,7 +42,7 @@ impl Cortex {
         };
 
         // 能動的推論の実行
-        if let Some(child_node) = cluster.execute_local_active_inference(event) {
+        if let Some(child_node) = cluster.execute_local_active_inference(event, config.mitosis_threshold) {
             // 有糸分裂が発生した場合、子ノードを保存
             self.storage.write_cluster(&child_node).await?;
         }
@@ -52,8 +54,6 @@ impl Cortex {
     }
 }
 
-// == FERRO_ADAPTIVE_ZONE_START
-#[allow(dead_code)]
-pub const MITOSIS_COST: f64 = 30.0;
-// == FERRO_ADAPTIVE_ZONE_END
+#[allow(unused_imports)]
+pub use sleep::{CortexConfig, load_cortex_config};
 

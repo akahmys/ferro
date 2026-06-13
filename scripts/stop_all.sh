@@ -35,6 +35,10 @@ pkill -f "dashboard_api.py" || true
 pkill -f "ferro-env" || true
 # Kill ferro-shell
 pkill -f "ferro-shell" || true
+# Kill gemini_mock_tutor
+pkill -f "gemini_mock_tutor.py" || true
+# Kill book_dripper
+pkill -f "book_dripper.py" || true
 
 # 3. Stop and remove Docker container
 CONTAINER_NAME="ferro-core-runtime"

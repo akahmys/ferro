@@ -65,13 +65,18 @@ def count_csv_rows(path: str) -> int:
         return 0
 
 def get_cluster_count() -> int:
-    cluster_dir = os.path.join(MEMORY_PATH, "knowledge_graph", "clusters")
+    cluster_dir = os.path.join(MEMORY_PATH, "knowledge_graph")
     if not os.path.exists(cluster_dir):
         return 0
+    count = 0
     try:
-        return len([n for n in os.listdir(cluster_dir) if n.endswith(".json")])
+        for root, dirs, files in os.walk(cluster_dir):
+            for file in files:
+                if file.endswith(".json") and not file.endswith(".tmp"):
+                    count += 1
+        return count
     except Exception:
-        return 0
+        return count
 
 def get_system_status_data():
     surprise_row = get_latest_csv_row(os.path.join(MEMORY_PATH, "surprise_history.csv"))
