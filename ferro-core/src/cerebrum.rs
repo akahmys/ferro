@@ -34,23 +34,18 @@ impl Cerebrum {
 
     pub fn evaluate_phase_transition(&mut self, cur_time: u64, temp: f32) -> CognitionPhase {
         assert!(cur_time > 0); assert!(temp > -100.0);
-        
         let mut last_input = self.last_interaction_timestamp;
         let path = std::path::Path::new("/memory/user_input.json");
-        if let Ok(metadata) = std::fs::metadata(path) {
-            if let Ok(modified) = metadata.modified() {
-                if let Ok(duration) = modified.duration_since(std::time::SystemTime::UNIX_EPOCH) {
-                    last_input = duration.as_secs();
-                }
-            }
+        if let Ok(d) = std::fs::metadata(path).and_then(|m| m.modified()).map_err(|_| ()).and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).map_err(|_| ())) {
+            last_input = d.as_secs();
         }
-
-        let next = if cur_time.saturating_sub(last_input) > 900 && temp < 65.0 { 
-            CognitionPhase::Sleep 
-        } else { 
-            CognitionPhase::Wake 
+        let next = if self.current_phase == CognitionPhase::Sleep {
+            if self.global_free_energy > 0.10 { CognitionPhase::Wake } else { CognitionPhase::Sleep }
+        } else if cur_time.saturating_sub(last_input) > 30 && self.global_free_energy <= 0.05 && temp < 65.0 {
+            CognitionPhase::Sleep
+        } else {
+            CognitionPhase::Wake
         };
-
         if std::mem::discriminant(&self.current_phase) != std::mem::discriminant(&next) {
             self.current_phase = next;
             let _ = self.phase_sender.send(self.current_phase);
@@ -59,22 +54,10 @@ impl Cerebrum {
         self.current_phase
     }
 
-    pub fn allocate_atp_to_clusters(
-        clusters: &mut [ClusterNode],
-        used_memory_bytes: u64,
-        limit_memory_bytes: u64,
-    ) {
-        assert!(limit_memory_bytes > 0, "Limit memory must be positive");
-        assert!(used_memory_bytes <= limit_memory_bytes || used_memory_bytes > 0, "Memory sanity check");
-
-        let headroom = 1.0 - (used_memory_bytes as f64 / limit_memory_bytes as f64).min(1.0);
-        const ATP_MAX_PER_CYCLE: f64 = 100.0;
-        let atp_per_cluster = headroom * ATP_MAX_PER_CYCLE;
-
-        for cluster in clusters.iter_mut() {
-            cluster.virtual_atp = atp_per_cluster;
-            cluster.is_dead = false;
-        }
+    pub fn allocate_atp_to_clusters(clusters: &mut [ClusterNode], used: u64, limit: u64) {
+        assert!(limit > 0); assert!(used <= limit || used > 0);
+        let headroom = 1.0 - (used as f64 / limit as f64).min(1.0);
+        for c in clusters.iter_mut() { c.virtual_atp = headroom * 100.0; c.is_dead = false; }
     }
 
     pub async fn record_free_energy(&mut self, timestamp: u64, fep: f64) -> Result<(), std::io::Error> {

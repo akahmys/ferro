@@ -37,9 +37,9 @@ async fn main() {
     let (_audio_tx, audio_rx) = mpsc::channel(100);
 
     let (mute_tx, _mute_rx) = broadcast::channel(100);
-    let (midbrain_surprise_tx, mut midbrain_surprise_rx) = mpsc::channel(100);
-    let (hippo_surprise_tx, hippo_surprise_rx) = mpsc::channel(100);
-    let (cerebrum_surprise_tx, cerebrum_surprise_rx) = mpsc::channel(100);
+    let (midbrain_surprise_tx, mut midbrain_surprise_rx) = mpsc::channel::<(f32, String)>(100);
+    let (hippo_surprise_tx, hippo_surprise_rx) = mpsc::channel::<(f32, String)>(100);
+    let (cerebrum_surprise_tx, cerebrum_surprise_rx) = mpsc::channel::<(f32, String)>(100);
 
     let (midbrain_echo_tx, midbrain_echo_rx) = mpsc::channel(100);
     let (midbrain_eff_tx, midbrain_eff_rx) = mpsc::channel(100);
@@ -51,7 +51,7 @@ async fn main() {
         let mut count = 0;
         while let Some(surprise) = midbrain_surprise_rx.recv().await {
             assert!(count < 1_000_000_000); count += 1;
-            let _ = hippo_surprise_tx.send(surprise).await;
+            let _ = hippo_surprise_tx.send(surprise.clone()).await;
             let _ = cerebrum_surprise_tx.send(surprise).await;
         }
     });

@@ -6,7 +6,7 @@ use crate::organs::BrainstemCommand;
 impl Cerebrum {
     pub async fn run_loop(
         cerebrum: Arc<Mutex<Self>>, cortex: Arc<crate::cortex::Cortex>,
-        mut int_rx: mpsc::Receiver<()>, mut surprise_rx: mpsc::Receiver<f32>,
+        mut int_rx: mpsc::Receiver<()>, mut surprise_rx: mpsc::Receiver<(f32, String)>,
         mut kill_rx: broadcast::Receiver<BrainstemCommand>,
     ) {
         assert!(Arc::strong_count(&cortex) >= 1);
@@ -22,6 +22,10 @@ impl Cerebrum {
                     let now = std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH)
                         .map(|d| d.as_secs()).unwrap_or(0);
                     let mut cer = cerebrum.lock().await;
+                    
+                    // Natural exponential decay of FEP when quiet (5% per second)
+                    cer.global_free_energy = (cer.global_free_energy * 0.95).max(0.0);
+                    
                     let prev = cer.current_phase;
                     let phase = cer.evaluate_phase_transition(now, 50.0);
                     let fep = cer.global_free_energy;
@@ -49,13 +53,20 @@ impl Cerebrum {
                     let now = std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
                     cerebrum.lock().await.last_interaction_timestamp = now;
                 }
-                Some(s) = surprise_rx.recv() => {
+                Some((s, _id)) = surprise_rx.recv() => {
                     let now = std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
                     let mut cer = cerebrum.lock().await;
                     cer.last_interaction_timestamp = now;
                     let prev_fep = cer.global_free_energy;
+                    
+                    // Set surprise immediately
+                    cer.global_free_energy = s as f64;
+                    
+                    // Immediately evaluate potential dynamic arousal
+                    let _ = cer.evaluate_phase_transition(now, 50.0);
+                    let fep = cer.global_free_energy;
                     if (s as f64 - prev_fep).abs() > 0.001 {
-                        let _ = cer.record_free_energy(now, s as f64).await;
+                        let _ = cer.record_free_energy(now, fep).await;
                     }
                 }
                 Ok(cmd) = kill_rx.recv() => { if matches!(cmd, BrainstemCommand::ForceSleep) { break; } }

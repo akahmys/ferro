@@ -98,15 +98,17 @@ ferro-project/                   # ワークスペースルート
 5. **脳幹（Brainstem）**:  
    `skin/*` アクターから非同期にプッシュ送信される `InteroceptiveSignal` に基づきスロットリングを監視。ポーリングに伴うスレッドの定常負荷を排除。物理臨界値突破時には、非同期タスク群に `Backoff` 命令を同報送信する。  
 6. **中脳（Midbrain）**:  
-   小脳から受信した `EfferenceCopy` を用い、入力 `SensorySignal` に含まれる自己発声・自己記述エコーを減算相殺（Efference Cancellation）。相殺後に残存した外部環境変動のみを抽出し、その驚愕度 $S$ を算定、クラスター局所適用のAGC（自動ゲイン制御）を介して空間ルーティングを実行。自己発音時には感覚ミュート指示を耳（`ear/`）アクターに送信してマルチモーダル驚愕度発散を防ぐ。  
+   小脳から受信した `EfferenceCopy` を用い、入力 `SensorySignal` に含まれる自己発声・自己記述エコーを減算相殺（Efference Cancellation）。相殺後に残存した外部環境変動のみを抽出し、その驚愕度 $S$ を算定、クラスター局所適用のAGC（自動ゲイン制御）を介して空間ルーティングを実行。自己発音時には感覚ミュート指示を耳（`ear/`）アクターに送信してマルチモーダル驚愕度発散を防ぐ。また、外受容感覚から `SensorySignal::SpeechToken(tokens)` を受け取った際は、最初のトークンだけでなく**全トークンをループ処理**して中脳のSurprise伝播チャネルへ個別にルーティングを送信する。  
 7. **海馬（Hippocampus）**:  
    中脳を通過した高Surpriseな事象を、インメモリ固定長リングバッファへ超高速・低負荷でスタックし、`episodic_buffer.csv` へ非同期ダンプ（時間的ダンパー）。  
 8. **大脳・皮質**:  
-   覚醒期は重計算（ASTパースやグラフ変容）を完全にロックし、物理オーバーヘッドを極小化。
+   覚醒期は重計算（ASTパースやグラフ変容）を完全にロックし、物理オーバーヘッドを極小化。また、毎秒5%の割合で大脳のグローバル自由エネルギー（FEP）が自然指数減衰する緩和プロセスが稼働する。  
+9. **驚愕度駆動の即時覚醒 (Surprise-driven Arousal)**:  
+   睡眠期（Sleep）において、感覚入力等に起因するグローバル予測誤差（驚愕度）が突発的に閾値（0.10）を突破した場合、大脳は即座に覚醒期（Wake）への強制遷移（Arousal）を実行し、感覚入力および反射のリアルタイムループを再始動する。  
 
 ### **2.2 睡眠期（記憶固定化と能動的推論：マクロ低速処理）**
 
-1. 外部刺激の滴下が一定時間（15分）途絶えると、大脳が非同期タイマーイベントをトリガーし、システム全体を「睡眠期」に遷移させる。  
+1. 外部刺激の滴下が途絶え（最後の入力から30秒超経過）、かつFEP（自由エネルギー）が緩和基準値（0.05以下）に減衰し、脳温度が閾値（65.0℃未満）を下回ると、大脳がシステム全体を「睡眠期」に遷移させる。  
 2. 海馬が日中に蓄積した高Surpriseな短期エピソードを順次スキャンし、皮質の対象アクターチャネルに向けて低速で再生（リプレイ）する。  
 3. 皮質（`Cortex`）のクラスター群は、海馬からリプレイされた刺激だけを対象に、局所FEP（自由エネルギー最小化）計算をバックグラウンド実行。  
 4. 長期記憶を司る `StorageManager` を介してナレッジグラフのクラスター構造を自己組織化（有糸分裂・側抑制・剪定）させ、長期記憶として固定化。  
@@ -327,50 +329,83 @@ pub enum SensoryMuteCommand {
 }
 
 pub struct Midbrain {  
-    pub min_gain: f64,  
-    pub lambda: f64,  
-    pub active_efference_queue: Vec<EfferenceCopy>,                      // 随伴発射の同期キュー  
-    pub mute_sensory_sender: tokio::sync::mpsc::Sender<SensoryMuteCommand>, // 自己発話時の耳ミュートチャネル
+    pub efference_rx: tokio::sync::mpsc::Receiver<EfferenceCopy>,
+    pub echo_rx: tokio::sync::mpsc::Receiver<SensorySignal>,
+    pub mute_tx: tokio::sync::broadcast::Sender<SensoryMuteCommand>,
+    pub surprise_tx: tokio::sync::mpsc::Sender<(f32, String)>,
+    pub pending_efference: std::collections::VecDeque<EfferenceCopy>,
+    pub match_window_ms: u64,
+    pub max_pending: usize,
 }
 
 impl Midbrain {  
-    pub fn new(min_g: f64, l: f64, mute_tx: tokio::sync::mpsc::Sender<SensoryMuteCommand>) -> Self {  
+    pub fn new(
+        efference_rx: tokio::sync::mpsc::Receiver<EfferenceCopy>,
+        echo_rx: tokio::sync::mpsc::Receiver<SensorySignal>,
+        mute_tx: tokio::sync::broadcast::Sender<SensoryMuteCommand>,
+        surprise_tx: tokio::sync::mpsc::Sender<(f32, String)>,
+        match_window_ms: u64,
+        max_pending: usize,
+    ) -> Self {  
         Self {  
-            min_gain: min_g,  
-            lambda: l,  
-            active_efference_queue: Vec::new(),  
-            mute_sensory_sender: mute_tx,
+            efference_rx,  
+            echo_rx,  
+            mute_tx,  
+            surprise_tx,  
+            pending_efference: std::collections::VecDeque::with_capacity(max_pending),  
+            match_window_ms,  
+            max_pending,  
         }  
     }
 
-    /// クラスター個別に適用するAGCゲイン値を計算する。  
-    pub fn calculate_cluster_gain(&self, node_count: usize) -> f64 {  
-        self.min_gain + (1.0 - self.min_gain) * (1.0 - (-self.lambda * node_count as f64).exp())  
+    /// 随伴発射（Efference Copy）の受信と、自己発話時の耳ミュート（-40.0 dB）の送信を処理する。
+    pub async fn handle_efference_copy(&mut self, eff: EfferenceCopy) {
+        if self.pending_efference.len() >= self.max_pending {
+            let _ = self.pending_efference.pop_front();
+        }
+        self.pending_efference.push_back(eff);
+        let _ = self.mute_tx.send(SensoryMuteCommand { mute: true, attenuation_db: -40.0 });
     }
 
-    /// 随伴発射（Efference Copy）を用いて、上がってきた実際の感覚入力 SensorySignal から  
-    /// 自己出力起因の成分を引き算（相殺）し、実質的な感覚驚愕度を算出する。  
-    pub fn perform_efference_cancellation(&mut self, signal: &mut SensorySignal) {  
-        match signal {  
-            SensorySignal::ProprioceptiveEcho(tokens) => {  
-                if let Some(eff) = self.active_efference_queue.first() {  
-                    if eff.expected_tokens == *tokens {  
-                        // 自己受容感覚が意図通りのため、信号を完全クリアして Surprise 発散を相殺  
-                        tokens.clear();  
-                        // 特殊感覚（耳）の一時ミュート解除を送信
-                        let _ = self.mute_sensory_sender.blocking_send(SensoryMuteCommand::Mute(false));
-                    }  
-                    self.active_efference_queue.remove(0);  
-                }  
-            }  
-            _ => {}  
-        }  
+    /// 感覚入力（SensorySignal）を受信し、驚愕度評価と空間ルーティングを実施する。
+    /// 特に SpeechToken(tokens) を受信した際は、すべてのトークンをループで走査し、
+    /// それぞれに割り当てられたクラスターIDへSurprise情報を個別に伝播させる。
+    pub async fn handle_sensory_echo(&mut self, signal: SensorySignal) {
+        match signal {
+            SensorySignal::ProprioceptiveEcho(tokens) => {
+                let mut matched = false;
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                let mut match_idx = None;
+                for (idx, eff) in self.pending_efference.iter().enumerate() {
+                    let time_diff = now.saturating_sub(eff.timestamp);
+                    if time_diff <= self.match_window_ms / 1000 && eff.expected_tokens == tokens {
+                        matched = true; match_idx = Some(idx); break;
+                    }
+                }
+                let surprise = if matched {
+                    if let Some(i) = match_idx { let _ = self.pending_efference.remove(i); }
+                    0.0
+                } else {
+                    1.0
+                };
+                let _ = self.surprise_tx.send((surprise, "cortex_midbrain_gate".to_string())).await;
+                let _ = self.mute_tx.send(SensoryMuteCommand { mute: false, attenuation_db: 0.0 });
+            }
+            SensorySignal::FrameDelta(delta) => {
+                let surprise = (delta as f32).min(1.0);
+                if surprise > 0.01 {
+                    let _ = self.surprise_tx.send((surprise, "cortex_midbrain_gate".to_string())).await;
+                }
+            }
+            SensorySignal::SpeechToken(tokens) => {
+                for token in tokens {
+                    let cluster_id = if token.len() >= 2 { token } else { "cortex_midbrain_gate".to_string() };
+                    let _ = self.surprise_tx.send((0.3, cluster_id)).await;
+                }
+            }
+            _ => {}
+        }
     }
-
-    /// 外受容感覚シグナルの特徴量に基づき、皮質内の対象クラスターへの空間ルーティング先をデコードする。  
-    pub fn route_sensory_to_cluster(&self, signal: &SensorySignal) -> String {  
-        unimplemented!()  
-    }  
 }
 ```
 
@@ -444,16 +479,36 @@ impl Cerebrum {
         }  
     }
 
-    /// 小脳を介した外受容入力の頻度、および脳幹から提供される物理リソース状態から、睡眠期と覚醒期の状態遷移を判定する。  
-    pub fn evaluate_phase_transition(&mut self, current_time: u64, system_temp: f32) -> CognitionPhase {  
-        let next_phase = if current_time - self.last_interaction_timestamp > 900 && system_temp < 65.0 {  
-            CognitionPhase::Sleep  
-        } else {  
-            CognitionPhase::Wake  
+    /// 最後の入力からの経過時間、FEP（自由エネルギー）の蓄積レベル、および脳幹から提供される物理リソース状態（温度等）に基づき、睡眠期と覚醒期の状態遷移を判定する。  
+    pub fn evaluate_phase_transition(&mut self, cur_time: u64, temp: f32) -> CognitionPhase {  
+        let mut last_input = self.last_interaction_timestamp;
+        let path = std::path::Path::new("/memory/user_input.json");
+        if let Ok(metadata) = std::fs::metadata(path) {
+            if let Ok(modified) = metadata.modified() {
+                if let Ok(duration) = modified.duration_since(std::time::SystemTime::UNIX_EPOCH) {
+                    last_input = duration.as_secs();
+                }
+            }
+        }
+
+        let next = if self.current_phase == CognitionPhase::Sleep {
+            // FEP（Surprise）が閾値（0.10）を超えた場合、即座に覚醒（Arousal）をトリガー
+            if self.global_free_energy > 0.10 {
+                CognitionPhase::Wake
+            } else {
+                CognitionPhase::Sleep
+            }
+        } else {
+            // 最後の入力から30秒超経過、かつFEPが0.05以下に緩和され、かつ温度が65.0℃未満の場合に睡眠期へ移行
+            if cur_time.saturating_sub(last_input) > 30 && self.global_free_energy <= 0.05 && temp < 65.0 {
+                CognitionPhase::Sleep
+            } else {
+                CognitionPhase::Wake
+            }
         };
 
-        if std::mem::discriminant(&self.current_phase) != std::mem::discriminant(&next_phase) {
-            self.current_phase = next_phase;
+        if std::mem::discriminant(&self.current_phase) != std::mem::discriminant(&next) {
+            self.current_phase = next;
             let _ = self.phase_sender.send(self.current_phase); // 状態を同報送信
         }
         self.current_phase  

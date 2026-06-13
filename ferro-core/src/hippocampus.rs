@@ -19,11 +19,11 @@ pub struct Hippocampus {
     pub count: usize,
     pub capacity: usize,
     pub storage_path: String,
-    pub surprise_rx: mpsc::Receiver<f32>,
+    pub surprise_rx: mpsc::Receiver<(f32, String)>,
 }
 
 impl Hippocampus {
-    pub fn new(capacity: usize, storage_path: String, surprise_rx: mpsc::Receiver<f32>) -> Self {
+    pub fn new(capacity: usize, storage_path: String, surprise_rx: mpsc::Receiver<(f32, String)>) -> Self {
         assert!(capacity > 0); assert!(!storage_path.is_empty());
         Self { buffer: vec![None; capacity], head: 0, count: 0, capacity, storage_path, surprise_rx }
     }
@@ -35,7 +35,7 @@ impl Hippocampus {
             loop_count += 1;
             let tick = tokio::time::timeout(tokio::time::Duration::from_millis(500), async {
                 tokio::select! {
-                    Some(val) = self.surprise_rx.recv() => { self.register_surprise_episode(val).await; false }
+                    Some((val, cluster_id)) = self.surprise_rx.recv() => { self.register_surprise_episode(val, cluster_id).await; false }
                     Ok(cmd) = kill_rx.recv() => { matches!(cmd, BrainstemCommand::ForceSleep) }
                 }
             }).await;
@@ -50,13 +50,14 @@ impl Hippocampus {
         if self.count < self.capacity { self.count += 1; }
     }
 
-    async fn register_surprise_episode(&mut self, surprise: f32) {
+    async fn register_surprise_episode(&mut self, surprise: f32, cluster_id: String) {
         assert!(surprise >= 0.0); assert!(self.capacity > 0);
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs()).unwrap_or(0);
+
         let slot = EpisodicSlot {
             timestamp: now, event_id: format!("evt_{}", now),
-            origin_cluster_id: "cortex_midbrain_gate".to_string(),
+            origin_cluster_id: cluster_id,
             sensory_summary: "audio_feedback_processed".to_string(),
             motor_summary: "vocal_output_logged".to_string(), surprise_level: surprise,
         };

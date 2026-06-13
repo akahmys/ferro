@@ -80,6 +80,15 @@ pub async fn trigger_sleep_replay(cortex: Arc<super::Cortex>, path: &std::path::
     }
 
     let mut clusters = cortex.storage.read_all_clusters().await?;
+
+    // Dynamically insert missing parent clusters before consolidation
+    for event in &replay_events {
+        if !clusters.iter().any(|c| c.cluster_id == event.origin_cluster_id) {
+            let new_parent = ClusterNode::new(event.origin_cluster_id.clone());
+            clusters.push(new_parent);
+        }
+    }
+
     run_sleep_consolidation(&mut clusters, &replay_events);
 
     for cluster in &clusters {

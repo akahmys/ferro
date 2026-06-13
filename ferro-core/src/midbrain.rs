@@ -6,14 +6,14 @@ pub struct Midbrain {
     pub efference_rx: mpsc::Receiver<EfferenceCopy>,
     pub echo_rx: mpsc::Receiver<SensorySignal>,
     pub mute_tx: broadcast::Sender<SensoryMuteCommand>,
-    pub surprise_tx: mpsc::Sender<f32>,
+    pub surprise_tx: mpsc::Sender<(f32, String)>,
     pub pending_efference: VecDeque<EfferenceCopy>,
     pub match_window_ms: u64,
     pub max_pending: usize,
 }
 
 impl Midbrain {
-    pub fn new(efference_rx: mpsc::Receiver<EfferenceCopy>, echo_rx: mpsc::Receiver<SensorySignal>, mute_tx: broadcast::Sender<SensoryMuteCommand>, surprise_tx: mpsc::Sender<f32>, match_window_ms: u64, max_pending: usize) -> Self {
+    pub fn new(efference_rx: mpsc::Receiver<EfferenceCopy>, echo_rx: mpsc::Receiver<SensorySignal>, mute_tx: broadcast::Sender<SensoryMuteCommand>, surprise_tx: mpsc::Sender<(f32, String)>, match_window_ms: u64, max_pending: usize) -> Self {
         assert!(match_window_ms > 0); assert!(max_pending > 0);
         Self { efference_rx, echo_rx, mute_tx, surprise_tx, pending_efference: VecDeque::with_capacity(max_pending), match_window_ms, max_pending }
     }
@@ -60,17 +60,20 @@ impl Midbrain {
                 } else {
                     1.0
                 };
-                let _ = self.surprise_tx.send(surprise).await;
+                let _ = self.surprise_tx.send((surprise, "cortex_midbrain_gate".to_string())).await;
                 let _ = self.mute_tx.send(SensoryMuteCommand { mute: false, attenuation_db: 0.0 });
             }
             SensorySignal::FrameDelta(delta) => {
                 assert!(self.match_window_ms > 0);
                 let surprise = (delta as f32).min(1.0);
-                if surprise > 0.01 { let _ = self.surprise_tx.send(surprise).await; }
+                if surprise > 0.01 { let _ = self.surprise_tx.send((surprise, "cortex_midbrain_gate".to_string())).await; }
             }
             SensorySignal::SpeechToken(tokens) => {
                 assert!(self.match_window_ms > 0);
-                if !tokens.is_empty() { let _ = self.surprise_tx.send(0.3).await; }
+                for token in tokens {
+                    let cluster_id = if token.len() >= 2 { token } else { "cortex_midbrain_gate".to_string() };
+                    let _ = self.surprise_tx.send((0.3, cluster_id)).await;
+                }
             }
             _ => {}
         }

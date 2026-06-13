@@ -19,7 +19,7 @@ pub async fn run_evolution_cycle(memory_host_path: &str) -> Result<(), Box<dyn s
     let roadmap = supervisor.analyze_cortex_bottlenecks("surprise_history.csv").map_err(|e| e.to_string())?;
     
     let kg_path = Path::new(memory_host_path).join("knowledge_graph");
-    let kg_json = if kg_path.exists() {
+    let kg_json = if kg_path.is_file() {
         std::fs::read_to_string(&kg_path)?
     } else {
         r#"{"nodes": []}"#.to_string()

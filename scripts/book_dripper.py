@@ -59,13 +59,18 @@ def get_latest_fep_and_phase():
     return 0.0, "Wake"
 
 def get_cortex_clusters():
-    cluster_dir = os.path.join(MEMORY_DIR, "knowledge_graph", "clusters")
-    if not os.path.exists(cluster_dir):
+    base_dir = os.path.join(MEMORY_DIR, "knowledge_graph")
+    if not os.path.exists(base_dir):
         return 0
+    count = 0
     try:
-        return len([n for n in os.listdir(cluster_dir) if n.endswith(".json")])
+        for root, dirs, files in os.walk(base_dir):
+            for file in files:
+                if file.endswith(".json") and not file.endswith(".tmp"):
+                    count += 1
+        return count
     except Exception:
-        return 0
+        return count
 
 def load_book_for_stage(stage):
     filename = f"stage_{stage:02d}.json"
@@ -139,6 +144,12 @@ def main():
             # Detect phase transition
             if last_phase == "Wake" and phase == "Sleep":
                 print(f"[Dripper] Phase transition detected: Wake -> Sleep.")
+                print("[Dripper] Waiting 30s for Sleep consolidation to complete before evaluating success...")
+                time.sleep(30)
+                # Reload latest stats after sleep consolidation
+                fep, _ = get_latest_fep_and_phase()
+                clusters = get_cortex_clusters()
+                
                 if state["auto_advance"]:
                     success = get_stage_success(current_stage, fep, clusters)
                     print(f"[Dripper] Evaluating Stage {current_stage} success: fep={fep:.4f}, clusters={clusters}, success={success}")
@@ -220,20 +231,20 @@ def main():
                 page_idx += 1
                 if page_idx >= len(pages):
                     print(f"[Dripper] Finished dripping all {len(pages)} pages of Stage {current_stage} book.")
-                    print("[Dripper] Initiating resting period (950s) to allow FERRO to transition to Sleep phase...")
+                    print("[Dripper] Initiating resting period (45s) to allow FERRO to transition to Sleep phase...")
                     page_idx = 0
                     
                     resting_elapsed = 0
                     check_phase = "Wake"
-                    while resting_elapsed < 950:
+                    while resting_elapsed < 45:
                         time.sleep(5)
                         resting_elapsed += 5
                         _, check_phase = get_latest_fep_and_phase()
                         if check_phase == "Sleep":
                             print("[Dripper] FERRO has entered Sleep phase during the rest period. Proceeding.")
                             break
-                        if resting_elapsed % 60 == 0:
-                            print(f"[Dripper] Resting... {resting_elapsed}/950s elapsed. FERRO Phase: {check_phase}")
+                        if resting_elapsed % 15 == 0:
+                            print(f"[Dripper] Resting... {resting_elapsed}/45s elapsed. FERRO Phase: {check_phase}")
                     
                     if check_phase != "Sleep":
                         print("[Dripper] Resting period completed. FERRO did not enter Sleep yet. Continuing.")

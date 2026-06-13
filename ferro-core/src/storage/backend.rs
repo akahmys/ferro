@@ -7,11 +7,11 @@ pub enum StorageBackend {
 }
 
 pub fn resolve_paths(base_path: &Path, node_id: &str) -> (PathBuf, PathBuf) {
-    assert!(node_id.len() >= 2);
+    assert!(node_id.chars().count() >= 2);
     assert!(!node_id.contains(".."));
 
-    let shard_id = &node_id[0..2];
-    let shard_dir = base_path.join(shard_id);
+    let shard_id: String = node_id.chars().take(2).collect();
+    let shard_dir = base_path.join(&shard_id);
     let file_path = shard_dir.join(format!("{}.json", node_id));
 
     assert!(shard_dir.starts_with(base_path));

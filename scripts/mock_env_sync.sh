@@ -102,17 +102,20 @@ trigger_sleep_suspension() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sending SIGSTOP to ferro-env (PID: $ENV_PID)..."
     kill -STOP "$ENV_PID"
     
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Data supply suspended. Waiting for $DURATION seconds..."
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Data supply suspended. Waiting for $DURATION seconds (monitoring for early wakeup)..."
     
-    # Sleep in loop to survive signal interrupts
     start_time=$(date +%s)
     end_time=$((start_time + DURATION))
     while [ $(date +%s) -lt $end_time ]; do
-      remaining=$((end_time - $(date +%s)))
-      [ $remaining -le 0 ] && break
-      sleep "$remaining" &
-      SLEEP_PID=$!
-      wait "$SLEEP_PID" 2>/dev/null
+      if [ -f "$CSV_PATH" ]; then
+        last_line=$(tail -n 1 "$CSV_PATH")
+        current_phase=$(echo "$last_line" | awk -F',' '{print $3}' | tr -d '\r\n[:space:]')
+        if [ "$current_phase" = "Wake" ]; then
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] Core woke up early. Resuming environmental data supply."
+          break
+        fi
+      fi
+      sleep 1
     done
     
     if ps -p "$ENV_PID" > /dev/null 2>&1; then
@@ -125,15 +128,19 @@ trigger_sleep_suspension() {
   else
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Warning: ferro-env (PID: $ENV_PID) is not running. Skipping SIGSTOP/SIGCONT."
     # Simulate suspension wait anyway in case of dummy test
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Waiting for $DURATION seconds in mock state..."
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Waiting for $DURATION seconds in mock state (monitoring for early wakeup)..."
     start_time=$(date +%s)
     end_time=$((start_time + DURATION))
     while [ $(date +%s) -lt $end_time ]; do
-      remaining=$((end_time - $(date +%s)))
-      [ $remaining -le 0 ] && break
-      sleep "$remaining" &
-      SLEEP_PID=$!
-      wait "$SLEEP_PID" 2>/dev/null
+      if [ -f "$CSV_PATH" ]; then
+        last_line=$(tail -n 1 "$CSV_PATH")
+        current_phase=$(echo "$last_line" | awk -F',' '{print $3}' | tr -d '\r\n[:space:]')
+        if [ "$current_phase" = "Wake" ]; then
+          echo "[$(date '+%Y-%m-%d %H:%M:%S')] Core woke up early. Breaking mock suspension."
+          break
+        fi
+      fi
+      sleep 1
     done
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Mock suspension completed."
   fi

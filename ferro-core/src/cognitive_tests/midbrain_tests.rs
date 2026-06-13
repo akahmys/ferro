@@ -7,7 +7,7 @@ async fn test_midbrain_efference_matching() {
     let (eff_tx, eff_rx) = mpsc::channel(10);
     let (_echo_tx, echo_rx) = mpsc::channel(10);
     let (mute_tx, mut mute_rx) = broadcast::channel(10);
-    let (surprise_tx, mut surprise_rx) = mpsc::channel(10);
+    let (surprise_tx, mut surprise_rx) = mpsc::channel::<(f32, String)>(10);
 
     let mut midbrain = Midbrain::new(eff_rx, echo_rx, mute_tx, surprise_tx, 2000, 5);
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
@@ -26,7 +26,7 @@ async fn test_midbrain_efference_matching() {
     
     let surprise = surprise_rx.recv().await;
     assert!(surprise.is_some());
-    assert_eq!(surprise, Some(0.0));
+    assert_eq!(surprise, Some((0.0, "cortex_midbrain_gate".to_string())));
 
     let mute_cmd = mute_rx.recv().await;
     assert!(mute_cmd.is_ok());

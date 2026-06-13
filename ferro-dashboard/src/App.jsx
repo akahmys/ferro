@@ -125,7 +125,7 @@ export default function App() {
             const next = [...prev, {
               time: new Date(data.status.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
               fep: parseFloat(data.status.fep.toFixed(4)),
-              surprise: parseFloat((data.sensory.visual.frame_delta * 10).toFixed(4))
+              surprise: parseFloat(data.sensory.visual.frame_delta.toFixed(4))
             }];
             if (next.length > 30) next.shift();
             return next;
@@ -479,7 +479,7 @@ export default function App() {
           {/* FEP Chart */}
           <div className="glass-panel p-5 flex-1 flex flex-col min-h-[220px]">
             <div className="flex justify-between items-center mb-3">
-              <h2 className="text-base font-semibold text-[#2D2C2A] flex items-center gap-2">
+              <h2 className="text-xs font-semibold text-[#2D2C2A] font-mono flex items-center gap-2">
                 <TrendingUp className="h-4 w-4 text-[#3B9E99]" />
                 Global Free Energy Trend (FEP)
               </h2>
@@ -490,8 +490,8 @@ export default function App() {
                 <LineChart data={fepHistory} margin={{ top: 10, right: -10, left: -10, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(230, 227, 219, 0.5)" vertical={false} />
                   <XAxis dataKey="time" stroke="#9C978E" style={{ fontSize: '9px', fontFamily: 'monospace' }} tickLine={false} axisLine={false} />
-                  <YAxis yAxisId="left" stroke="#3B9E99" orientation="left" style={{ fontSize: '9px', fontFamily: 'monospace' }} domain={[0, 1.0]} tickLine={false} axisLine={false} />
-                  <YAxis yAxisId="right" stroke="#E77A60" orientation="right" style={{ fontSize: '9px', fontFamily: 'monospace' }} domain={[0, 'auto']} tickLine={false} axisLine={false} />
+                  <YAxis yAxisId="left" stroke="#3B9E99" orientation="left" style={{ fontSize: '9px', fontFamily: 'monospace' }} domain={[0, 1.0]} allowDataOverflow={true} tickLine={false} axisLine={false} />
+                  <YAxis yAxisId="right" stroke="#E77A60" orientation="right" style={{ fontSize: '9px', fontFamily: 'monospace' }} domain={[0, 1.0]} allowDataOverflow={true} tickLine={false} axisLine={false} />
                   <Tooltip contentStyle={{ background: '#FFFFFF', border: '1px solid #E6E3DB', borderRadius: '8px', fontSize: '11px', fontFamily: 'monospace', color: '#2D2C2A' }} />
                   <Line yAxisId="left" type="monotone" name="Free Energy" dataKey="fep" stroke="#3B9E99" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
                   <Line yAxisId="right" type="monotone" name="Surprise" dataKey="surprise" stroke="#E77A60" strokeWidth={1.5} strokeDasharray="3 3" dot={false} />
