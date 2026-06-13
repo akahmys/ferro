@@ -34,7 +34,23 @@ impl Cerebrum {
 
     pub fn evaluate_phase_transition(&mut self, cur_time: u64, temp: f32) -> CognitionPhase {
         assert!(cur_time > 0); assert!(temp > -100.0);
-        let next = if cur_time.saturating_sub(self.last_interaction_timestamp) > 900 && temp < 65.0 { CognitionPhase::Sleep } else { CognitionPhase::Wake };
+        
+        let mut last_input = self.last_interaction_timestamp;
+        let path = std::path::Path::new("/memory/user_input.json");
+        if let Ok(metadata) = std::fs::metadata(path) {
+            if let Ok(modified) = metadata.modified() {
+                if let Ok(duration) = modified.duration_since(std::time::SystemTime::UNIX_EPOCH) {
+                    last_input = duration.as_secs();
+                }
+            }
+        }
+
+        let next = if cur_time.saturating_sub(last_input) > 900 && temp < 65.0 { 
+            CognitionPhase::Sleep 
+        } else { 
+            CognitionPhase::Wake 
+        };
+
         if std::mem::discriminant(&self.current_phase) != std::mem::discriminant(&next) {
             self.current_phase = next;
             let _ = self.phase_sender.send(self.current_phase);

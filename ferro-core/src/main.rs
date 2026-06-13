@@ -74,7 +74,7 @@ async fn main() {
 
     setup::spawn_actors(int_tx, sensory_tx, motor_rx, audio_rx, &cmd_tx, pm, &mute_tx).await;
     setup::spawn_receivers(sensory_rx, eff_rx, midbrain_echo_tx, midbrain_eff_tx, interaction_tx);
-    setup::run_test_scenario(cerebellum, motor_tx);
+    setup::run_test_scenario(cerebellum.clone(), motor_tx);
 
     tokio::spawn(midbrain.run_loop(cmd_tx.subscribe()));
     tokio::spawn(hippocampus.run_loop(cmd_tx.subscribe()));

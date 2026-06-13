@@ -216,17 +216,36 @@ def main():
 
                 print(f"[Dripper] [Stage {current_stage}] Page {page_idx + 1}/{len(pages)} dripped: text='{text}', FEP={fep:.4f}, Clusters={clusters}")
 
-                # Advance page
-                page_idx = (page_idx + 1) % len(pages)
-
-                # Sleep interval, but check phase periodically
-                elapsed = 0
-                while elapsed < args.interval:
-                    time.sleep(1)
-                    elapsed += 1
-                    _, current_phase = get_latest_fep_and_phase()
-                    if current_phase == "Sleep":
-                        break
+                # Advance page and check loop completion
+                page_idx += 1
+                if page_idx >= len(pages):
+                    print(f"[Dripper] Finished dripping all {len(pages)} pages of Stage {current_stage} book.")
+                    print("[Dripper] Initiating resting period (950s) to allow FERRO to transition to Sleep phase...")
+                    page_idx = 0
+                    
+                    resting_elapsed = 0
+                    check_phase = "Wake"
+                    while resting_elapsed < 950:
+                        time.sleep(5)
+                        resting_elapsed += 5
+                        _, check_phase = get_latest_fep_and_phase()
+                        if check_phase == "Sleep":
+                            print("[Dripper] FERRO has entered Sleep phase during the rest period. Proceeding.")
+                            break
+                        if resting_elapsed % 60 == 0:
+                            print(f"[Dripper] Resting... {resting_elapsed}/950s elapsed. FERRO Phase: {check_phase}")
+                    
+                    if check_phase != "Sleep":
+                        print("[Dripper] Resting period completed. FERRO did not enter Sleep yet. Continuing.")
+                else:
+                    # Sleep interval, but check phase periodically
+                    elapsed = 0
+                    while elapsed < args.interval:
+                        time.sleep(1)
+                        elapsed += 1
+                        _, current_phase = get_latest_fep_and_phase()
+                        if current_phase == "Sleep":
+                            break
     finally:
         if os.path.exists(lock_file):
             try:

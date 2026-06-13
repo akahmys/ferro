@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
-  Activity, Cpu, MessageSquare, Terminal, Zap, 
-  TrendingUp, Eye, Ear, Send, Shield, AlertTriangle, Play, Square 
+  Activity, MessageSquare, Terminal, 
+  TrendingUp, Eye, Ear, Send, Shield 
 } from 'lucide-react';
 import { 
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid 
@@ -10,7 +10,7 @@ import {
 const API_BASE = "http://localhost:18080";
 
 export default function App() {
-  const [status, setStatus] = useState({
+  const [status, setStatus] = useState(() => ({
     fep: 0.0,
     phase: "Wake",
     cpu_temp: 42.0,
@@ -22,7 +22,7 @@ export default function App() {
     complexity_level: 0.5,
     timestamp: Date.now(),
     uptime: 0
-  });
+  }));
 
   const formatUptime = (seconds) => {
     if (seconds === undefined || seconds === null) return "00:00:00";
@@ -49,7 +49,15 @@ export default function App() {
   const eventSourceRef = useRef(null);
   const nodePhysicsRef = useRef({ nodes: [], links: [] });
 
-
+  // Define helper functions before useEffect to prevent Temporal Dead Zone issues
+  const addLog = (msg) => {
+    if (!msg || msg.trim() === "") return;
+    setLogFeed((prev) => {
+      const next = [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`];
+      if (next.length > 50) next.shift();
+      return next;
+    });
+  };
 
   const fetchFepHistory = async () => {
     try {
@@ -68,9 +76,26 @@ export default function App() {
     }
   };
 
+  const fetchChatHistory = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/chat/history`);
+      if (res.ok) {
+        const data = await res.json();
+        setChatList(data);
+      }
+    } catch (e) {
+      console.error("Error fetching chat", e);
+    }
+  };
+
   // 1. Establish SSE / Fallback Polling connection
   useEffect(() => {
-    fetchFepHistory();
+    // Run initial history fetch in a microtask to avoid calling setState synchronously in the effect setup phase
+    Promise.resolve().then(() => {
+      fetchFepHistory();
+      fetchChatHistory();
+    });
+
     const connectSSE = () => {
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
@@ -126,7 +151,7 @@ export default function App() {
               setSensory(sensData);
               setIsOnline(true);
             }
-          } catch (e) {
+          } catch {
             setIsOnline(false);
           }
         }, 1500);
@@ -136,34 +161,11 @@ export default function App() {
     };
 
     connectSSE();
-    fetchChatHistory();
 
     return () => {
       if (eventSourceRef.current) eventSourceRef.current.close();
     };
   }, []);
-
-  // Sync chat history
-  const fetchChatHistory = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/chat/history`);
-      if (res.ok) {
-        const data = await res.json();
-        setChatList(data);
-      }
-    } catch (e) {
-      console.error("Error fetching chat", e);
-    }
-  };
-
-  const addLog = (msg) => {
-    if (!msg || msg.trim() === "") return;
-    setLogFeed((prev) => {
-      const next = [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`];
-      if (next.length > 50) next.shift();
-      return next;
-    });
-  };
 
   // 2. Chat sending handler
   const handleSendMessage = async (e) => {
@@ -182,7 +184,7 @@ export default function App() {
       if (res.ok) {
         fetchChatHistory();
       }
-    } catch (err) {
+    } catch {
       addLog("Failed to send message to core.");
     }
   };

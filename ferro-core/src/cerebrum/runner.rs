@@ -24,6 +24,11 @@ impl Cerebrum {
                     let mut cer = cerebrum.lock().await;
                     let prev = cer.current_phase;
                     let phase = cer.evaluate_phase_transition(now, 50.0);
+                    let fep = cer.global_free_energy;
+                    let last_recorded_time = cer.history.last().map(|(t, _, _)| *t).unwrap_or(0);
+                    if prev != phase || now.saturating_sub(last_recorded_time) >= 5 {
+                        let _ = cer.record_free_energy(now, fep).await;
+                    }
                     if prev == CognitionPhase::Wake && phase == CognitionPhase::Sleep {
                         let path = crate::storage::manager::get_safe_path("/memory/episodic_buffer.csv");
                         let cortex_ref = cortex.clone();
@@ -48,7 +53,10 @@ impl Cerebrum {
                     let now = std::time::SystemTime::now().duration_since(std::time::SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
                     let mut cer = cerebrum.lock().await;
                     cer.last_interaction_timestamp = now;
-                    let _ = cer.record_free_energy(now, s as f64).await;
+                    let prev_fep = cer.global_free_energy;
+                    if (s as f64 - prev_fep).abs() > 0.001 {
+                        let _ = cer.record_free_energy(now, s as f64).await;
+                    }
                 }
                 Ok(cmd) = kill_rx.recv() => { if matches!(cmd, BrainstemCommand::ForceSleep) { break; } }
             }

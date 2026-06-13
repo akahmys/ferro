@@ -118,6 +118,11 @@ async fn run_lifecycle_loop(memory_host_path: &str) -> Result<(), Box<dyn std::e
         
         pruning::prune_resources(memory_host_path, None).await?;
 
+        let surprise_csv = Path::new(memory_host_path).join("surprise_history.csv");
+        if surprise_csv.exists() {
+            let _ = std::fs::remove_file(&surprise_csv);
+        }
+
         if let Err(e) = rebuild_core_runtime().await {
             eprintln!("[ferro-shell] Error rebuilding runtime: {:?}", e);
         }
@@ -152,7 +157,13 @@ async fn run_lifecycle_loop(memory_host_path: &str) -> Result<(), Box<dyn std::e
             _ = sleep_rx => {
                 println!("[ferro-shell] Sleep phase transition detected. Stopping container...");
                 sleep_triggered = true;
-                let _ = container::stop_container(CONTAINER_NAME).await;
+                if let Err(e) = container::stop_container(CONTAINER_NAME).await {
+                    eprintln!("[ferro-shell] Warning: failed to stop container cleanly: {:?}", e);
+                    let _ = tokio::process::Command::new("docker")
+                        .args(["kill", CONTAINER_NAME])
+                        .output()
+                        .await;
+                }
                 match container_join.await {
                     Ok(Ok(status)) => Some(status),
                     _ => None

@@ -51,3 +51,9 @@ impl Cortex {
         Ok(())
     }
 }
+
+// == FERRO_ADAPTIVE_ZONE_START
+#[allow(dead_code)]
+pub const MITOSIS_COST: f64 = 30.0;
+// == FERRO_ADAPTIVE_ZONE_END
+

@@ -10,6 +10,7 @@ pub struct FrameDeltaActor {
 
 #[derive(serde::Deserialize, Debug, Clone)]
 struct VisualStimulus {
+    timestamp: u64,
     frame_delta: f64,
 }
 
@@ -24,6 +25,7 @@ impl FrameDeltaActor {
         assert!(self.threshold >= 0.0);
         assert!(self.threshold <= 1.0);
         let mut loop_count: u64 = 0;
+        let mut last_timestamp = 0;
         loop {
             let pid = std::process::id();
             assert!(pid > 0);
@@ -35,8 +37,9 @@ impl FrameDeltaActor {
                 async {
                     tokio::select! {
                         delta_opt = Self::read_frame_delta() => {
-                            if let Some(delta) = delta_opt {
-                                if delta >= self.threshold {
+                            if let Some((ts, delta)) = delta_opt {
+                                if ts != last_timestamp && delta >= self.threshold {
+                                     last_timestamp = ts;
                                      let _ = self.sender.send(SensorySignal::FrameDelta(delta)).await;
                                 }
                             }
@@ -56,7 +59,7 @@ impl FrameDeltaActor {
         }
     }
 
-    async fn read_frame_delta() -> Option<f64> {
+    async fn read_frame_delta() -> Option<(u64, f64)> {
         let pid = std::process::id();
         assert!(pid > 0);
         let path = std::path::Path::new("/memory/stimulus/visual.json");
@@ -65,6 +68,6 @@ impl FrameDeltaActor {
         }
         let content = tokio::fs::read_to_string(path).await.ok()?;
         let stimulus: VisualStimulus = serde_json::from_str(&content).ok()?;
-        Some(stimulus.frame_delta)
+        Some((stimulus.timestamp, stimulus.frame_delta))
     }
 }

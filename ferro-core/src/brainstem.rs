@@ -72,11 +72,15 @@ impl Brainstem {
                                 is_throttled = false;
                                 let _ = self.broadcast_backoff(false);
                             }
+                        } else {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                         }
                     }
                     panic_opt = self.panic_receiver.recv() => {
                         if let Some(panic_data) = panic_opt {
                             self.execute_panic_shutdown(panic_data).await;
+                        } else {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                         }
                     }
                 }

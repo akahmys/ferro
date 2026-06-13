@@ -117,10 +117,15 @@ pub async fn stop_container(container_name: &str) -> Result<(), Box<dyn std::err
     assert!(!container_name.is_empty(), "Container name must not be empty");
     assert!(container_name.len() >= 3, "Container name must be of reasonable length");
 
-    let _ = Command::new("docker")
+    let output = Command::new("docker")
         .args(["stop", "-t", "5", container_name])
         .output()
         .await?;
+
+    if !output.status.success() {
+        let err_msg = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to stop container {}: {}", container_name, err_msg).into());
+    }
 
     assert!(!container_name.is_empty(), "Container name remains valid");
     Ok(())

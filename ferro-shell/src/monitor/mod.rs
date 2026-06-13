@@ -46,7 +46,7 @@ pub async fn run_monitor_daemon(
     let mut stats = stats::SurpriseStats::new(50);
     let mut last_summary = Instant::now();
     let mut active_clusters = HashSet::new();
-    let mut interval = tokio::time::interval(Duration::from_millis(200));
+    let mut interval = tokio::time::interval(Duration::from_millis(1000));
 
     loop {
         tokio::select! {
