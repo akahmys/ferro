@@ -2,3 +2,6 @@ pub mod brainstem;
 pub mod cerebellum;
 pub mod message;
 pub mod organs;
+pub mod storage;
+pub mod hippocampus;
+pub mod midbrain;

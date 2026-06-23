@@ -43,6 +43,8 @@ fn poll_files(
     brainstem_tx: &mpsc::Sender<InteroceptiveSignal>,
     eye_tx: &mpsc::Sender<SensorySignal>,
     ear_tx: &mpsc::Sender<SensorySignal>,
+    midbrain: &Arc<ferro_core::midbrain::Midbrain>,
+    hippocampus: &Arc<ferro_core::hippocampus::Hippocampus>,
 ) {
     let interoceptive_path = memory_dir.join("interoceptive_signals.json");
     if let Ok(content) = fs::read_to_string(&interoceptive_path) {
@@ -50,6 +52,19 @@ fn poll_files(
         if let Ok(signals) = serde_json::from_str::<Vec<InteroceptiveSignal>>(&content) {
             for sig in signals {
                 let _ = brainstem_tx.try_send(sig);
+            }
+        }
+    }
+
+    let efference_path = memory_dir.join("stimulus/efference_copy.json");
+    if let Ok(content) = fs::read_to_string(&efference_path) {
+        let _ = fs::remove_file(&efference_path);
+        if let Ok(copies) = serde_json::from_str::<Vec<ferro_core::message::EfferenceCopy>>(&content) {
+            for copy in copies {
+                let midbrain_clone = midbrain.clone();
+                tokio::spawn(async move {
+                    let _ = midbrain_clone.handle_efference_copy(copy).await;
+                });
             }
         }
     }
@@ -63,8 +78,23 @@ fn poll_files(
                     SensorySignal::FrameDelta(_) | SensorySignal::ImageEmbedding(_) => {
                         let _ = eye_tx.try_send(sig);
                     }
-                    SensorySignal::Mfcc(_) | SensorySignal::SpeechToken(_) | SensorySignal::ProprioceptiveEcho(_) => {
+                    SensorySignal::Mfcc(_) | SensorySignal::SpeechToken(_) => {
                         let _ = ear_tx.try_send(sig);
+                    }
+                    SensorySignal::ProprioceptiveEcho(tokens) => {
+                        let midbrain_clone = midbrain.clone();
+                        let hippocampus_clone = hippocampus.clone();
+                        tokio::spawn(async move {
+                            if let Ok(surprise) = midbrain_clone.handle_proprioceptive_echo(tokens.clone()) {
+                                let slot = ferro_core::hippocampus::EpisodicSlot {
+                                    timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+                                    input: format!("{:?}", tokens),
+                                    output: "".to_string(),
+                                    surprise,
+                                };
+                                let _ = hippocampus_clone.record_episode(slot);
+                            }
+                        });
                     }
                     SensorySignal::LogHash(_) => {}
                 }
@@ -83,10 +113,15 @@ async fn main() {
     let (_skin_tx, skin_rx) = mpsc::channel::<InteroceptiveSignal>(100);
     let (eye_tx, eye_rx) = mpsc::channel::<SensorySignal>(100);
     let (ear_tx, ear_rx) = mpsc::channel::<SensorySignal>(100);
-    let (_mute_tx, mute_rx) = mpsc::channel::<SensoryMuteCommand>(100);
+    let (mute_tx, mute_rx) = mpsc::channel::<SensoryMuteCommand>(100);
     let (motor_tx, motor_rx) = mpsc::channel::<MotorCommand>(100);
 
     let cerebellum = Arc::new(Cerebellum::new(Arc::clone(&terminate), memory_dir.clone()));
+    let midbrain = Arc::new(ferro_core::midbrain::Midbrain::new(mute_tx));
+    let hippocampus = Arc::new(ferro_core::hippocampus::Hippocampus::new(memory_dir.join("episodic_buffer.csv")));
+    let storage = Arc::new(ferro_core::storage::Storage::new(memory_dir.clone(), 5000));
+
+    let _ = storage.put("actor_init".to_string(), "init_state".to_string());
 
     let mut skin = SkinActor::new(skin_rx);
     let brainstem_tx_clone = brainstem_tx.clone();
@@ -140,7 +175,7 @@ async fn main() {
             eprintln!("WARNING: Cerebellum cycle jitter exceeded 10ms: {:?}", elapsed);
         }
 
-        poll_files(&memory_dir, &brainstem_tx, &eye_tx, &ear_tx);
+        poll_files(&memory_dir, &brainstem_tx, &eye_tx, &ear_tx, &midbrain, &hippocampus);
 
         while let Ok(signal) = brainstem_rx.try_recv() {
             brainstem.handle_signal(signal);
