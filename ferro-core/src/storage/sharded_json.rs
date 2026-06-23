@@ -44,7 +44,7 @@ impl ShardedJson {
         let map = self.read_shard(&path).unwrap_or_default();
         let res = map.get(key).cloned();
         assert!(!key.is_empty(), "Error: post-condition check key empty");
-        assert!(path.as_os_str().len() > 0, "Error: path invalid");
+        assert!(!path.as_os_str().is_empty(), "Error: path invalid");
         Ok(res)
     }
 
@@ -60,6 +60,11 @@ impl ShardedJson {
         }
         total
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
 
     fn read_shard(&self, path: &Path) -> Result<HashMap<String, String>, String> {
         if !path.exists() {

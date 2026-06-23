@@ -73,12 +73,11 @@ impl Storage {
             (*r).clone()
         };
 
-        let val = match current_state {
+        match current_state {
             StorageState::ShardedJson(ref json) => json.get(key),
             StorageState::Migrating { ref json, .. } => json.get(key),
             StorageState::Redb(ref redb) => redb.get(key),
-        };
-        val
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -92,6 +91,11 @@ impl Storage {
             StorageState::Redb(ref redb) => redb.len(),
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
 
     fn trigger_migration(&self, json: Arc<ShardedJson>) -> Result<(), String> {
         assert!(self.threshold > 0, "Error: threshold must be valid");

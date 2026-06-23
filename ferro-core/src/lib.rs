@@ -5,3 +5,5 @@ pub mod organs;
 pub mod storage;
 pub mod hippocampus;
 pub mod midbrain;
+pub mod cerebrum;
+pub mod cortex;

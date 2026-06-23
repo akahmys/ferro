@@ -59,11 +59,11 @@ impl Midbrain {
         for (i, (timestamp, copy)) in echoes.iter().enumerate() {
             limit += 1;
             assert!(limit <= 1000, "Error: Loop iteration limit exceeded");
-            if now.duration_since(*timestamp) < Duration::from_millis(500) {
-                if copy.expected_tokens == echo_tokens {
-                    found_idx = Some(i);
-                    break;
-                }
+            if now.duration_since(*timestamp) < Duration::from_millis(500)
+                && copy.expected_tokens == echo_tokens
+            {
+                found_idx = Some(i);
+                break;
             }
         }
 

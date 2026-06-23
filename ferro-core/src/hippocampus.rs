@@ -23,18 +23,18 @@ impl Hippocampus {
         std::thread::spawn(move || {
             let mut writer_limit = 0;
             let file_exists = csv_path.exists();
-            if let Ok(file) = OpenOptions::new().create(true).write(true).append(true).open(&csv_path) {
+            if let Ok(file) = OpenOptions::new().create(true).append(true).open(&csv_path) {
                 let mut wtr = csv::Writer::from_writer(file);
                 if !file_exists {
-                    let _ = wtr.write_record(&["timestamp", "input", "output", "surprise"]);
+                    let _ = wtr.write_record(["timestamp", "input", "output", "surprise"]);
                     let _ = wtr.flush();
                 }
             }
 
             while let Some(slot) = rx.blocking_recv() {
                 writer_limit += 1;
-                assert!(writer_limit <= 1000000, "Error: Hippocampus writer loop safety limit exceeded");
-                if let Ok(file) = OpenOptions::new().create(true).write(true).append(true).open(&csv_path) {
+                assert!(writer_limit <= 1_000_000, "Error: Hippocampus writer loop safety limit exceeded");
+                if let Ok(file) = OpenOptions::new().create(true).append(true).open(&csv_path) {
                     let mut wtr = csv::Writer::from_writer(file);
                     let _ = wtr.serialize(slot);
                     let _ = wtr.flush();

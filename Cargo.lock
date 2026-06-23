@@ -103,7 +103,9 @@ name = "ferro-core"
 version = "0.1.0"
 dependencies = [
  "csv",
+ "ferro-body",
  "libc",
+ "rayon",
  "redb",
  "serde",
  "serde_json",
