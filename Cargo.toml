@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "ferro-body",
+    "ferro-core",
+    "ferro-monitor",
+    "ferro-shell",
+]
+resolver = "2"

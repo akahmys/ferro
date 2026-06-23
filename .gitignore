@@ -1,0 +1,31 @@
+# Rust build artifacts
+/target/
+
+# Local configuration & Secrets
+.env
+*.env
+*.local
+*secrets*
+credentials.csv
+service-account.json
+google-service-account.json
+
+# Keys and Certificates
+*.pem
+*.key
+*.crt
+id_rsa
+id_ecdsa
+id_ed25519
+
+# Shared memory directory (tmpfs mapping)
+/memory/
+/memory/*
+
+# Scratch directory (Run-time isolated files)
+/scratch/
+/scratch/*
+
+# OS specific files
+.DS_Store
+Thumbs.db

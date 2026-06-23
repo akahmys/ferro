@@ -1,0 +1,76 @@
+#!/bin/sh
+
+# GitHub 漏洩防止 pre-commit フック
+
+# 1. コミット対象のファイル名自体のチェック (フック自身はチェック対象から除外)
+FORBIDDEN_FILES="\.env|secrets\.json|credentials\.csv|service-account\.json|google-service-account\.json"
+STAGED_FILES=$(git diff --cached --name-only | grep -v "scripts/pre-commit")
+
+for file in $STAGED_FILES; do
+    if echo "$file" | grep -Eq "$FORBIDDEN_FILES"; then
+        echo "=========================================================="
+        echo "🚨 ERROR: コミット禁止ファイルが検出されました: $file"
+        echo "セキュリティ上、このファイルをコミットすることはできません。"
+        echo "=========================================================="
+        exit 1
+    fi
+done
+
+# 2. コミットされる変更（コード差分）のスキャン
+# ※フック自身への変更をスキャン対象から完全に除外するため、Git パススペック ':!scripts/pre-commit' を使用
+TEMP_DIFF=$(mktemp)
+git diff --cached -- . ':!scripts/pre-commit' > "$TEMP_DIFF"
+
+# スキャンパターン定義
+# 2.1. 絶対パス
+PATH_PATTERN="/Users/akahmys"
+
+# 2.2. APIキー・トークン (範囲指定で検知確率を向上)
+# gsk_ (Groq), AIzaSy (Gemini), sk- (OpenAI/Anthropic), ghp_/gho_ (GitHub)
+# ※ハイフンはエスケープせず、文字クラスの最後に配置
+KEY_PATTERN="gsk_[a-zA-Z0-9]{30,50}|AIzaSy[A-Za-z0-9_-]{30,45}|sk-[a-zA-Z0-9]{30,50}|ghp_[a-zA-Z0-9]{30,40}|gho_[a-zA-Z0-9]{30,40}"
+
+# 2.3. 秘密鍵ヘッダー
+PRIVATE_KEY_PATTERN="-----BEGIN [A-Z ]*PRIVATE KEY-----"
+
+# 差分内で追加された行 (先頭が '+') のみをスキャン対象にする
+# (先頭が '+' で、かつ '+++' で始まらない行)
+# ※環境依存のエラーを防ぐため、エスケープを使わず文字クラス [+] を使用
+ADDED_LINES=$(grep '^[+]' "$TEMP_DIFF" | grep -v '^[+][+][+]')
+
+rm -f "$TEMP_DIFF"
+
+if [ -n "$ADDED_LINES" ]; then
+    # 絶対パスの検出 (ハイフン開始対策として -- を付与、file:// リンクは除外)
+    # ※AI用の Clickable リンク [file:///Users/akahmys/...] は許容する
+    SAFE_ADDED_LINES=$(echo "$ADDED_LINES" | grep -v "file:///Users/akahmys")
+    
+    if [ -n "$SAFE_ADDED_LINES" ]; then
+        if echo "$SAFE_ADDED_LINES" | grep -E -- "$PATH_PATTERN" > /dev/null; then
+            echo "=========================================================="
+            echo "🚨 ERROR: コミットしようとしたコードに絶対パスが検出されました！"
+            echo "検出された記述: $(echo "$SAFE_ADDED_LINES" | grep -E -- "$PATH_PATTERN")"
+            echo "=========================================================="
+            exit 1
+        fi
+    fi
+
+    # APIキー・シークレットの検出 (ハイフン開始対策として -- を付与)
+    if echo "$ADDED_LINES" | grep -Ei -- "$KEY_PATTERN" > /dev/null; then
+        echo "=========================================================="
+        echo "🚨 ERROR: コミットしようとしたコードに API キーが検出されました！"
+        echo "検出された記述: $(echo "$ADDED_LINES" | grep -Ei -- "$KEY_PATTERN")"
+        echo "=========================================================="
+        exit 1
+    fi
+
+    # 秘密鍵ヘッダーの検出 (ハイフン開始対策として -- を付与)
+    if echo "$ADDED_LINES" | grep -E -- "$PRIVATE_KEY_PATTERN" > /dev/null; then
+        echo "=========================================================="
+        echo "🚨 ERROR: コミットしようとしたコードに秘密鍵ヘッダーが検出されました！"
+        echo "=========================================================="
+        exit 1
+    fi
+fi
+
+exit 0
