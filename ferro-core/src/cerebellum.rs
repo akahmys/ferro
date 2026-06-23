@@ -26,7 +26,10 @@ impl Cerebellum {
         let mut reason = "";
 
         // パス検閲: "/memory" または "/tmp" 以外への書き込みは不正パスと判定
-        if !command.target_path.starts_with("/memory") && !command.target_path.starts_with("/tmp") {
+        if !command.target_path.starts_with("/memory")
+            && !command.target_path.starts_with("/tmp")
+            && !command.target_path.starts_with("/private/tmp")
+        {
             is_violation = true;
             reason = "Error: Write attempt outside allowed paths";
         }

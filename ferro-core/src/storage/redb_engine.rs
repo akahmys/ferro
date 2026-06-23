@@ -1,4 +1,4 @@
-use redb::{Database, TableDefinition, ReadableTableMetadata};
+use redb::{Database, TableDefinition, ReadableTableMetadata, ReadableTable};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -28,8 +28,34 @@ impl RedbEngine {
         Ok(())
     }
 
-    pub fn get(&self, key: &str) -> Result<Option<String>, String> {
+    pub fn remove(&self, key: &str) -> Result<bool, String> {
         assert!(!key.is_empty(), "Error: key must not be empty");
+        let write_txn = self.db.begin_write().map_err(|e| e.to_string())?;
+        let removed = {
+            let mut table = write_txn.open_table(TABLE).map_err(|e| e.to_string())?;
+            table.remove(key).map_err(|e| e.to_string())?.is_some()
+        };
+        write_txn.commit().map_err(|e| e.to_string())?;
+        Ok(removed)
+     }
+ 
+    pub fn get_all_entries(&self) -> Result<std::collections::HashMap<String, String>, String> {
+        let read_txn = self.db.begin_read().map_err(|e| e.to_string())?;
+        let table = read_txn.open_table(TABLE).map_err(|e| e.to_string())?;
+        let mut map = std::collections::HashMap::new();
+        let mut limit = 0;
+        for result in table.iter().map_err(|e| e.to_string())? {
+            limit += 1;
+            assert!(limit <= 100_000, "Error: Loop limit exceeded in redb get_all_entries");
+            if let Ok((k, v)) = result {
+                map.insert(k.value().to_string(), v.value().to_string());
+            }
+        }
+        Ok(map)
+    }
+
+    pub fn get(&self, key: &str) -> Result<Option<String>, String> {
+         assert!(!key.is_empty(), "Error: key must not be empty");
         assert!(key.len() < 1000, "Error: key is too long");
         let read_txn = self.db.begin_read().map_err(|e| e.to_string())?;
         let table = read_txn.open_table(TABLE).map_err(|e| e.to_string())?;

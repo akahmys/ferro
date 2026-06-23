@@ -78,6 +78,39 @@ impl Storage {
             StorageState::Migrating { ref json, .. } => json.get(key),
             StorageState::Redb(ref redb) => redb.get(key),
         }
+     }
+ 
+    pub fn remove(&self, key: &str) -> Result<bool, String> {
+        assert!(!key.is_empty(), "Error: key must not be empty");
+
+        let current_state = {
+            let r = self.state.read().map_err(|e| e.to_string())?;
+            (*r).clone()
+        };
+
+        let res = match current_state {
+            StorageState::ShardedJson(ref json) => json.remove(key)?,
+            StorageState::Migrating { ref json, ref redb } => {
+                let r1 = json.remove(key)?;
+                let r2 = redb.remove(key)?;
+                r1 || r2
+            }
+            StorageState::Redb(ref redb) => redb.remove(key)?,
+        };
+
+        Ok(res)
+    }
+
+    pub fn get_all_entries(&self) -> Result<std::collections::HashMap<String, String>, String> {
+        let current_state = {
+            let r = self.state.read().map_err(|e| e.to_string())?;
+            (*r).clone()
+        };
+        match current_state {
+            StorageState::ShardedJson(ref json) => Ok(json.get_all_entries()),
+            StorageState::Migrating { ref json, .. } => Ok(json.get_all_entries()),
+            StorageState::Redb(ref redb) => redb.get_all_entries(),
+        }
     }
 
     pub fn len(&self) -> usize {

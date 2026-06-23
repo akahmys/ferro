@@ -123,6 +123,41 @@ async fn main() {
 
     let _ = storage.put("actor_init".to_string(), "init_state".to_string());
 
+    let breeding_path = memory_dir.join("breeding_signals.json");
+    if breeding_path.exists() {
+        if let Ok(content) = fs::read_to_string(&breeding_path) {
+            #[derive(serde::Deserialize)]
+            struct BreedingSignals {
+                prune_cluster_ids: Option<Vec<String>>,
+            }
+            if let Ok(signals) = serde_json::from_str::<BreedingSignals>(&content) {
+                if let Some(ids) = signals.prune_cluster_ids {
+                    if let Ok(entries) = storage.get_all_entries() {
+                        let mut deleted_count = 0;
+                        let mut limit = 0;
+                        for (k, _) in entries {
+                            limit += 1;
+                            assert!(limit <= 100_000, "Error: Loop limit exceeded in main pruning hook");
+                            for id in &ids {
+                                let matches = k == format!("actor:{}", id)
+                                    || k.starts_with(&format!("link:{}->", id))
+                                    || k.ends_with(&format!("->{}", id))
+                                    || k.contains(&format!(":{}->", id))
+                                    || k.contains(&format!("->{}", id))
+                                    || k == *id;
+                                if matches {
+                                    let _ = storage.remove(&k);
+                                    deleted_count += 1;
+                                }
+                            }
+                        }
+                        println!("Pruning applied. Removed {} keys related to {:?}", deleted_count, ids);
+                    }
+                }
+            }
+        }
+    }
+
     let mut skin = SkinActor::new(skin_rx);
     let brainstem_tx_clone = brainstem_tx.clone();
     tokio::spawn(async move { skin.run(brainstem_tx_clone).await });

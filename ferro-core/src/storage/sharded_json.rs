@@ -48,6 +48,17 @@ impl ShardedJson {
         Ok(res)
     }
 
+    pub fn remove(&self, key: &str) -> Result<bool, String> {
+        assert!(!key.is_empty(), "Error: key must not be empty");
+        let path = self.shard_path(key);
+        let mut map = self.read_shard(&path).unwrap_or_default();
+        let removed = map.remove(key).is_some();
+        if removed {
+            self.write_shard(&path, &map)?;
+        }
+        Ok(removed)
+    }
+
     pub fn len(&self) -> usize {
         let mut total = 0;
         let mut limit = 0;
