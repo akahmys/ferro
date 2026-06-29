@@ -11,6 +11,8 @@ pub struct SystemMetricsSampler {
 
 impl SystemMetricsSampler {
     pub fn new(memory_dir: PathBuf) -> Self {
+        assert!(memory_dir.is_absolute(), "Error: memory_dir must be an absolute path");
+        assert!(!memory_dir.as_os_str().is_empty(), "Error: memory_dir must not be empty");
         let mut sys = System::new_all();
         sys.refresh_all();
         Self { sys, memory_dir }
@@ -19,12 +21,16 @@ impl SystemMetricsSampler {
     pub fn sample_and_write(&mut self) -> Result<(), std::io::Error> {
         // R5: アサーション最低2つを義務付け
         assert!(self.memory_dir.exists(), "Error: memory directory must exist");
+        assert!(self.memory_dir.is_absolute(), "Error: memory directory must be absolute");
 
         self.sys.refresh_cpu();
         self.sys.refresh_memory();
 
         let cpu_usage = self.sys.global_cpu_info().cpu_usage();
         let free_mem = self.sys.free_memory();
+
+        // 恒常性維持：正常範囲のバリデーション
+        assert!((0.0..=100.0).contains(&cpu_usage), "Error: CPU usage must be between 0 and 100");
 
         let csv_path = self.memory_dir.join("brainstem_metrics.csv");
         let mut file = OpenOptions::new()
@@ -46,11 +52,12 @@ impl SystemMetricsSampler {
             { "RamFree": free_mem }
         ]);
 
-        if let Ok(json_str) = serde_json::to_string_pretty(&signal_data) {
-            let temp_path = self.memory_dir.join("interoceptive_signals.tmp");
-            fs::write(&temp_path, json_str)?;
-            fs::rename(&temp_path, &signal_path)?;
-        }
+        let json_str = serde_json::to_string_pretty(&signal_data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        
+        let temp_path = self.memory_dir.join("interoceptive_signals.tmp");
+        fs::write(&temp_path, json_str)?;
+        fs::rename(&temp_path, &signal_path)?;
 
         assert!(signal_path.exists(), "Error: signal file must exist after atomic write");
         Ok(())

@@ -1,3 +1,6 @@
+#![deny(warnings)]
+#![deny(clippy::all)]
+
 pub mod brainstem;
 pub mod cerebellum;
 pub mod message;
@@ -7,3 +10,5 @@ pub mod hippocampus;
 pub mod midbrain;
 pub mod cerebrum;
 pub mod cortex;
+pub mod setup;
+pub mod audit;

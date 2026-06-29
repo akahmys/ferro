@@ -12,11 +12,13 @@ pub struct MotorActor {
 
 impl MotorActor {
     pub fn new(rx: mpsc::Receiver<MotorCommand>, cerebellum: Arc<Cerebellum>) -> Self {
-        Self { rx, cerebellum }
+        let motor = Self { rx, cerebellum };
+        assert!(motor.rx.capacity() < 2000, "Error: rx capacity limit check");
+        assert!(motor.rx.capacity() > 0, "Error: rx capacity must be positive");
+        motor
     }
 
     pub async fn run(&mut self) {
-        // R5: アサーション最低2つを義務付け
         assert!(self.cerebellum.censor_command(&MotorCommand {
             origin_cluster_id: "test".to_string(),
             target_path: "/tmp/test".to_string(),
@@ -25,16 +27,32 @@ impl MotorActor {
         }).is_ok(), "Error: cerebellum must be capable of auditing");
 
         let mut processed = 0;
-        while let Some(command) = self.rx.recv().await {
-            if self.cerebellum.censor_command(&command).is_ok() {
-                let path = std::path::Path::new(&command.target_path);
-                if let Some(parent) = path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
+        let mut loop_limit = 0;
+        let mut finished = false;
+
+        while !finished {
+            loop_limit += 1;
+            assert!(loop_limit <= 100_000, "Error: MotorActor loop iteration limit exceeded");
+
+            match tokio::time::timeout(std::time::Duration::from_millis(500), self.rx.recv()).await {
+                Ok(Some(command)) => {
+                    if self.cerebellum.censor_command(&command).is_ok() {
+                        let path = std::path::Path::new(&command.target_path);
+                        if let Some(parent) = path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        if let Ok(mut file) = File::create(path) {
+                            let _ = file.write_all(&command.payload);
+                        }
+                        processed += 1;
+                    }
                 }
-                if let Ok(mut file) = File::create(path) {
-                    let _ = file.write_all(&command.payload);
+                Ok(None) => {
+                    finished = true;
                 }
-                processed += 1;
+                Err(_) => {
+                    // タイムアウト
+                }
             }
         }
 

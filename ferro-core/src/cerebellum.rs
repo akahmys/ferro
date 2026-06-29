@@ -12,6 +12,8 @@ pub struct Cerebellum {
 
 impl Cerebellum {
     pub fn new(terminate_flag: Arc<AtomicBool>, memory_dir: PathBuf) -> Self {
+        assert!(!terminate_flag.load(Ordering::SeqCst), "Error: terminate flag must be initially false");
+        assert!(!memory_dir.as_os_str().is_empty(), "Error: memory directory must not be empty");
         Self {
             terminate_flag,
             memory_dir,
@@ -50,6 +52,8 @@ impl Cerebellum {
     }
 
     fn trigger_nociceptive_reflex(&self, command: &MotorCommand, reason: &str) {
+        assert!(!command.origin_cluster_id.is_empty(), "Error: origin_cluster_id must not be empty");
+        assert!(!reason.is_empty(), "Error: reason must not be empty");
         let dump_path = self.memory_dir.join("panic_dump.json");
         let dump_data = serde_json::json!({
             "error_code": "0x02",

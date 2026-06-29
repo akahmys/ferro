@@ -66,3 +66,64 @@ fn test_structural_pruning_flow() -> Result<(), String> {
     let _ = fs::remove_dir_all(&test_dir);
     Ok(())
 }
+
+#[test]
+fn test_readonly_storage_enforcement() -> Result<(), String> {
+    let test_dir = std::env::temp_dir().join("ferro_test_readonly");
+    let _ = fs::remove_dir_all(&test_dir);
+    let _ = fs::create_dir_all(&test_dir);
+
+    // 1. 通常の Storage で初期データを投入
+    {
+        let storage = Storage::new(test_dir.clone(), 5000);
+        storage.put("link:A->B".to_string(), "0.5".to_string())?;
+    }
+
+    // 2. ReadOnly モードで Storage を開く
+    let ro_storage = Storage::new_readonly(test_dir.clone())?;
+    assert!(ro_storage.is_readonly());
+
+    // 3. 書き込み・削除がエラーを返すことを検証
+    assert!(ro_storage.put("link:B->C".to_string(), "1.0".to_string()).is_err());
+    assert!(ro_storage.remove("link:A->B").is_err());
+
+    // 4. 読み込みができることを検証
+    assert_eq!(ro_storage.get("link:A->B")?.unwrap(), "0.5");
+
+    let _ = fs::remove_dir_all(&test_dir);
+    Ok(())
+}
+
+#[test]
+fn test_verifier_lipschitz_violation() -> Result<(), String> {
+    let test_dir = std::env::temp_dir().join("ferro_test_verifier");
+    let _ = fs::remove_dir_all(&test_dir);
+    let _ = fs::create_dir_all(&test_dir);
+
+    // 1. Lipschitz 境界 (3.6) を超過するデータを格納
+    // A -> B (2.0), A -> C (2.0) => 合計 4.0 (> 3.6)
+    {
+        let storage = Storage::new(test_dir.clone(), 5000);
+        storage.put("link:A->B".to_string(), "2.0".to_string())?;
+        storage.put("link:A->C".to_string(), "2.0".to_string())?;
+    }
+
+    // 2. Verifier の実行
+    let verifier = ferro_shell::verifier::Verifier::new(test_dir.clone());
+    let res = verifier.verify_safety_contracts();
+    
+    // 3. 違反の検知を検証
+    assert!(res.is_err());
+    assert!(res.unwrap_err().contains("Lipschitz violation"));
+
+    // 4. panic_dump.json の内容検証
+    let dump_path = test_dir.join("panic_dump.json");
+    assert!(dump_path.exists());
+    let dump_content = fs::read_to_string(&dump_path).map_err(|e| e.to_string())?;
+    let dump: PanicDump = serde_json::from_str(&dump_content).map_err(|e| e.to_string())?;
+    assert_eq!(dump.origin_cluster_id, "A");
+    assert_eq!(dump.violation_type, "LipschitzViolation");
+
+    let _ = fs::remove_dir_all(&test_dir);
+    Ok(())
+}

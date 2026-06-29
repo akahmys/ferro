@@ -20,7 +20,7 @@ impl Hippocampus {
         assert!(!csv_path.as_os_str().is_empty(), "Error: CSV path must not be empty");
         let (tx, mut rx) = mpsc::channel::<EpisodicSlot>(1000);
 
-        std::thread::spawn(move || {
+        tokio::spawn(async move {
             let mut writer_limit = 0;
             let file_exists = csv_path.exists();
             if let Ok(file) = OpenOptions::new().create(true).append(true).open(&csv_path) {
@@ -31,13 +31,26 @@ impl Hippocampus {
                 }
             }
 
-            while let Some(slot) = rx.blocking_recv() {
+            let mut finished = false;
+            while !finished {
                 writer_limit += 1;
                 assert!(writer_limit <= 1_000_000, "Error: Hippocampus writer loop safety limit exceeded");
-                if let Ok(file) = OpenOptions::new().create(true).append(true).open(&csv_path) {
-                    let mut wtr = csv::Writer::from_writer(file);
-                    let _ = wtr.serialize(slot);
-                    let _ = wtr.flush();
+                
+                // R1: タイムアウトを設けたチャネル受信
+                match tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await {
+                    Ok(Some(slot)) => {
+                        if let Ok(file) = OpenOptions::new().create(true).append(true).open(&csv_path) {
+                            let mut wtr = csv::Writer::from_writer(file);
+                            let _ = wtr.serialize(slot);
+                            let _ = wtr.flush();
+                        }
+                    }
+                    Ok(None) => {
+                        finished = true;
+                    }
+                    Err(_) => {
+                        // タイムアウト
+                    }
                 }
             }
         });

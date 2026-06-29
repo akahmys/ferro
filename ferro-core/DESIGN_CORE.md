@@ -28,8 +28,9 @@
 ### **1.6. Cerebrum (大脳 - 全域CSR管理)**
 * **責任**: 全域の変分自由エネルギーの集計、および重み行列の CSR (Compressed Sparse Row) 形式での管理・最適化（不要な接続の動的剪定）。
 
-### **1.7. Cortex (大脳皮質 - 倫理監査・クラスター適応)**
-* **責任**: 予測誤差上昇に伴うクラスターの自律的分裂（Mitosis）と側抑制、仮想ATP代謝による餓死・剪定、およびアライメントスコア $A_s$ のリアルタイム監査。
+### **1.7. Cortex (大脳皮質 - 倫理監査・クラスター適応・階層創発)**
+* **責任**: 予測誤差上昇に伴うクラスターの自律的分裂（Mitosis）と側抑制、仮想ATP代謝による餓死・剪定、アライメントスコア $A_s$ のリアルタイム監査、および**皮質内階層創発（学習率自己組織化と動的トポロジー適応）**。
+* **不変条件**: 外部（統括や他モジュール）からの Cortex 内部の具体的な結合操作や階層の強制は禁止。感覚入力の正規化および Breeding Engine を通じた可塑性係数 $\lambda$ の調整による間接的メタ制御（代謝レベルの制御）のみを許可する。
 
 ---
 
@@ -58,3 +59,20 @@
 
 ### **2.6. Undo Transaction (トランザクション復元)**
 * `with_mut_node()` 中に数理制約違反が発生した場合、即座に遷移を破棄し、トランザクション開始前の状態をアトミックに復元して `panic_dump.json` に詳細を出力する。
+
+### **2.7. 皮質内階層創発 (Intra-cortical Hierarchical Emergence)**
+* **A. 可塑性による役割の自律分化（学習率制御）**:
+  * 各 `DynamicClusterNode` は、現在の予測誤差 $E_i(t)$ とその指数移動平均（EMA） $\bar{E}_i(t)$ を用いて、学習率 $\eta_i(t)$ を自律的に制御する。
+    $$\eta_i(t) = \eta_{base} \cdot \exp\left( \lambda \cdot \frac{E_i(t) - \bar{E}_i(t)}{\bar{E}_i(t) + \epsilon} \right)$$
+  * 予測誤差の EMA $\bar{E}_i(t)$ は以下のように更新する：
+    $$\bar{E}_i(t) = (1 - \alpha_e) \cdot \bar{E}_i(t-1) + \alpha_e \cdot E_i(t)$$
+    平滑化係数 $\alpha_e = 0.1$, 基準学習率 $\eta_{base} = 0.05$, 可塑性係数 $\lambda = 1.0$, ゼロ除算防止用極小値 $\epsilon = 10^{-8}$ とする。
+  * 完全な決定性を確保するため、$\exp(x)$ 演算には純粋 Rust 実装である `libm::exp` を用いる。
+  * 学習率は $[\eta_{min}, \eta_{max}] = [0.001, 1.0]$、EMA は $[0.0, 100.0]$ の範囲にクランプする。
+* **B. 時間的共活性に基づく接続トポロジー適応**:
+  * ノード $j \to i$ の結合荷重 $W_{ij}$ は、推論サイクルごとの時間遅れ共活性化（Temporal Co-activation）に基づき、以下の Hebb則的適応ルールに従って更新される：
+    $$W_{ij}(t) = W_{ij}(t-1) + \eta_i(t) \cdot A_i(t) \cdot A_j(t-1) - \text{Decay} \cdot W_{ij}(t-1)$$
+    ここで $A_i(t)$ は現在の活性度、$\text{Decay}$ は自然減衰率。
+  * Lipschitz 境界（$\sum_j |w_{ij}| \leq 3.6$）を厳守するため、更新毎に以下の正規化処理を決定論的に施す：
+    $$\text{If } \sum_j |w_{ij}| > 3.6: \quad W_{ij} \leftarrow W_{ij} \cdot \frac{3.6}{\sum_k |w_{ik}|}$$
+  * 行列演算自体は `Cerebrum` が CSR 形式を用いて決定論的並列 Map/Reduce モデルで実行し、Cortex は各ノードの局所状態の保持に専念する。

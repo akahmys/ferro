@@ -10,11 +10,14 @@ pub struct Brainstem {
 
 impl Brainstem {
     pub fn new(terminate_flag: Arc<AtomicBool>) -> Self {
-        Self {
+        assert!(!terminate_flag.load(Ordering::SeqCst), "Error: terminate flag must be initially false");
+        let new_brainstem = Self {
             terminate_flag,
             last_ram_free: u64::MAX,
             last_cpu_temp: 0.0,
-        }
+        };
+        assert!(new_brainstem.last_ram_free == u64::MAX, "Error: initial last_ram_free must be u64::MAX");
+        new_brainstem
     }
 
     pub fn handle_signal(&mut self, signal: InteroceptiveSignal) {

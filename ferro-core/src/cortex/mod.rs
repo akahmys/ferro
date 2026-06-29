@@ -1,108 +1,8 @@
-use std::collections::HashMap;
-use std::pin::Pin;
+pub mod node;
+pub mod arena;
 
-pub struct DynamicClusterNode {
-    pub id: usize,
-    pub weight: f64,
-    pub atp: f64,
-    pub activity: f64,
-    pub prediction_error: f64,
-}
-
-pub struct NodeArena {
-    nodes: HashMap<usize, Pin<Box<DynamicClusterNode>>>,
-    next_id: usize,
-}
-
-impl NodeArena {
-    pub fn new() -> Self {
-        let arena = Self {
-            nodes: HashMap::new(),
-            next_id: 1,
-        };
-        assert!(arena.nodes.is_empty(), "Error: arena must be empty");
-        assert!(arena.next_id == 1, "Error: starting ID must be 1");
-        arena
-    }
-
-    pub fn create_node(&mut self, weight: f64, atp: f64) -> usize {
-        assert!(weight.is_finite(), "Error: weight must be finite");
-        assert!(atp >= 0.0, "Error: atp must be non-negative");
-
-        let id = self.next_id;
-        self.next_id += 1;
-
-        let node = Box::pin(DynamicClusterNode {
-            id,
-            weight,
-            atp,
-            activity: 0.0,
-            prediction_error: 0.0,
-        });
-        self.nodes.insert(id, node);
-
-        assert!(self.nodes.contains_key(&id), "Error: insertion failed");
-        assert!(id > 0, "Error: invalid node ID created");
-        id
-    }
-
-    pub fn with_mut_node<F, R>(&mut self, id: usize, f: F) -> Option<R>
-    where
-        F: FnOnce(&mut DynamicClusterNode) -> R,
-    {
-        assert!(id > 0, "Error: invalid node ID requested");
-        if let Some(node) = self.nodes.get_mut(&id) {
-            let node_mut = unsafe { node.as_mut().get_unchecked_mut() };
-            let res = f(node_mut);
-            assert!(node_mut.atp.is_finite(), "Error: ATP must be finite after mutation");
-            assert!(node_mut.weight.is_finite(), "Error: weight must be finite after mutation");
-            Some(res)
-        } else {
-            None
-        }
-    }
-
-    pub fn get_node(&self, id: usize) -> Option<&DynamicClusterNode> {
-        assert!(id > 0, "Error: invalid node ID requested");
-        let opt = self.nodes.get(&id).map(|pinned| pinned.as_ref().get_ref());
-        assert!(opt.as_ref().map(|n| n.id == id).unwrap_or(true), "Error: node ID mismatch");
-        opt
-    }
-
-    pub fn remove_node(&mut self, id: usize) -> Option<Pin<Box<DynamicClusterNode>>> {
-        assert!(id > 0, "Error: invalid node ID requested");
-        let removed = self.nodes.remove(&id);
-        assert!(removed.as_ref().map(|n| n.id == id).unwrap_or(true), "Error: removed node ID mismatch");
-        removed
-    }
-
-    pub fn ids(&self) -> Vec<usize> {
-        let mut ids: Vec<usize> = self.nodes.keys().cloned().collect();
-        ids.sort();
-        assert!(ids.len() == self.nodes.len(), "Error: size mismatch in IDs");
-        assert!(ids.is_empty() || ids[0] > 0, "Error: IDs must be positive");
-        ids
-    }
-
-    pub fn len(&self) -> usize {
-        let length = self.nodes.len();
-        assert!(length <= self.nodes.len(), "Error: size inconsistent");
-        length
-    }
-
-    pub fn is_empty(&self) -> bool {
-        let empty = self.nodes.is_empty();
-        assert!(empty == (self.nodes.len() == 0), "Error: inconsistency in empty check");
-        empty
-    }
-
-}
-
-impl Default for NodeArena {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+pub use node::DynamicClusterNode;
+pub use arena::NodeArena;
 
 pub struct Cortex {
     pub arena: NodeArena,
@@ -118,7 +18,7 @@ impl Cortex {
         cortex
     }
 
-    /// 有糸分裂: 予測誤差が一定値（例：2.0）を超えたノードを分裂させる
+    /// 有糸分裂: 予測誤差が一定値を超えたノードを分裂させる
     pub fn perform_mitosis(&mut self, error_threshold: f64) {
         assert!(error_threshold > 0.0, "Error: threshold must be positive");
         assert!(self.arena.len() < 100_000, "Error: too many nodes in cortex");
@@ -139,14 +39,12 @@ impl Cortex {
             mitosis_limit += 1;
             assert!(mitosis_limit <= 100_000, "Error: Loop limit exceeded in mitosis execution");
             
-            // 親ノードの重みを半分にする
             let parent_mutated = self.arena.with_mut_node(parent_id, |node| {
                 node.weight /= 2.0;
                 node.prediction_error = 0.0;
             });
             assert!(parent_mutated.is_some(), "Error: parent node not found for weight mutation");
 
-            // 新しいノードを作成
             let new_node_id = self.arena.create_node(weight / 2.0, atp);
             assert!(new_node_id > 0, "Error: new node must have positive ID");
         }
@@ -216,6 +114,35 @@ impl Cortex {
 
         assert!(starved_nodes.len() <= metab_limit, "Error: starved nodes cannot exceed processed nodes");
         starved_nodes
+    }
+
+    /// 学習率の自己組織化的更新（決定論的 libm::exp 採用）
+    pub fn update_learning_rates(&mut self, lambda: f64, eta_base: f64, alpha_e: f64) {
+        assert!(lambda >= 0.0, "Error: lambda must be non-negative");
+        assert!(eta_base > 0.0, "Error: eta_base must be positive");
+        assert!(alpha_e > 0.0 && alpha_e < 1.0, "Error: alpha_e must be between 0 and 1");
+
+        let ids = self.arena.ids();
+        let mut limit = 0;
+        let epsilon = 1e-8;
+
+        for id in ids {
+            limit += 1;
+            assert!(limit <= 100_000, "Error: Loop limit exceeded in learning rate update");
+
+            let _ = self.arena.with_mut_node(id, |node| {
+                let new_ema = (1.0 - alpha_e) * node.moving_average_error + alpha_e * node.prediction_error;
+                node.moving_average_error = new_ema.clamp(0.0, 100.0);
+
+                let diff = node.prediction_error - node.moving_average_error;
+                let denom = node.moving_average_error + epsilon;
+                let x = lambda * (diff / denom);
+                
+                let new_eta = eta_base * libm::exp(x);
+                node.learning_rate = new_eta.clamp(0.001, 1.0);
+            });
+        }
+        assert!(self.arena.len() < 100_000, "Error: post-condition check for arena size failed");
     }
 }
 

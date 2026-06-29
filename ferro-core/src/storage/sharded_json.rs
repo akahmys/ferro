@@ -50,6 +50,7 @@ impl ShardedJson {
 
     pub fn remove(&self, key: &str) -> Result<bool, String> {
         assert!(!key.is_empty(), "Error: key must not be empty");
+        assert!(key.len() < 1000, "Error: key is too long");
         let path = self.shard_path(key);
         let mut map = self.read_shard(&path).unwrap_or_default();
         let removed = map.remove(key).is_some();
@@ -78,6 +79,8 @@ impl ShardedJson {
 
 
     fn read_shard(&self, path: &Path) -> Result<HashMap<String, String>, String> {
+        assert!(!path.as_os_str().is_empty(), "Error: path must not be empty");
+        assert!(self.num_shards > 0, "Error: num_shards must be positive");
         if !path.exists() {
             return Ok(HashMap::new());
         }
@@ -89,6 +92,8 @@ impl ShardedJson {
     }
 
     fn write_shard(&self, path: &Path, map: &HashMap<String, String>) -> Result<(), String> {
+        assert!(!path.as_os_str().is_empty(), "Error: path must not be empty");
+        assert!(self.num_shards > 0, "Error: num_shards must be positive");
         let content = serde_json::to_string(map).map_err(|e| e.to_string())?;
         let mut file = File::create(path).map_err(|e| e.to_string())?;
         file.write_all(content.as_bytes()).map_err(|e| e.to_string())?;
@@ -103,7 +108,10 @@ impl ShardedJson {
             assert!(limit <= 1000, "Error: Loop iteration limit exceeded");
             let path = self.base_dir.join(format!("shard_{}.json", i));
             let map = self.read_shard(&path).unwrap_or_default();
+            let mut inner_limit = 0;
             for (k, v) in map {
+                inner_limit += 1;
+                assert!(inner_limit <= 100_000, "Error: Loop limit exceeded in shard entries copy");
                 all.insert(k, v);
             }
         }

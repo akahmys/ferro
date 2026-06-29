@@ -1,15 +1,15 @@
 pub mod sharded_json;
 pub mod redb_engine;
+pub mod migration;
 
 use sharded_json::ShardedJson;
 use redb_engine::RedbEngine;
 
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use std::thread;
 
 #[derive(Clone)]
-enum StorageState {
+pub(crate) enum StorageState {
     ShardedJson(Arc<ShardedJson>),
     Migrating {
         json: Arc<ShardedJson>,
@@ -19,9 +19,10 @@ enum StorageState {
 }
 
 pub struct Storage {
-    state: Arc<RwLock<StorageState>>,
+    pub(crate) state: Arc<RwLock<StorageState>>,
     memory_dir: PathBuf,
     threshold: usize,
+    read_only: bool,
 }
 
 impl Storage {
@@ -31,12 +32,44 @@ impl Storage {
         let json_dir = memory_dir.join("shards");
         let json = Arc::new(ShardedJson::new(json_dir, 16));
         let state = Arc::new(RwLock::new(StorageState::ShardedJson(json)));
-        Self { state, memory_dir, threshold }
+        Self { state, memory_dir, threshold, read_only: false }
+    }
+
+    pub fn new_readonly(memory_dir: PathBuf) -> Result<Self, String> {
+        assert!(!memory_dir.as_os_str().is_empty(), "Error: memory directory path must not be empty");
+        let redb_path = memory_dir.join("storage.redb");
+        
+        let state = if redb_path.exists() {
+            let redb = Arc::new(RedbEngine::new_readonly(redb_path)?);
+            Arc::new(RwLock::new(StorageState::Redb(redb)))
+        } else {
+            let json_dir = memory_dir.join("shards");
+            let json = Arc::new(ShardedJson::new(json_dir, 16));
+            Arc::new(RwLock::new(StorageState::ShardedJson(json)))
+        };
+
+        let storage = Self {
+            state,
+            memory_dir,
+            threshold: usize::MAX,
+            read_only: true,
+        };
+        assert!(storage.is_readonly(), "Error: post-condition check storage must be read-only");
+        Ok(storage)
+    }
+
+    pub fn is_readonly(&self) -> bool {
+        self.read_only
     }
 
     pub fn put(&self, key: String, value: String) -> Result<(), String> {
         assert!(!key.is_empty(), "Error: key must not be empty");
         assert!(!value.is_empty(), "Error: value must not be empty");
+        assert!(key.len() < 1000, "Error: key is too long");
+
+        if self.read_only {
+            return Err("Cannot write to read-only storage".to_string());
+        }
 
         let current_state = {
             let r = self.state.read().map_err(|e| e.to_string())?;
@@ -82,6 +115,11 @@ impl Storage {
  
     pub fn remove(&self, key: &str) -> Result<bool, String> {
         assert!(!key.is_empty(), "Error: key must not be empty");
+        assert!(key.len() < 1000, "Error: key is too long");
+
+        if self.read_only {
+            return Err("Cannot write to read-only storage".to_string());
+        }
 
         let current_state = {
             let r = self.state.read().map_err(|e| e.to_string())?;
@@ -131,6 +169,7 @@ impl Storage {
 
 
     fn trigger_migration(&self, json: Arc<ShardedJson>) -> Result<(), String> {
+        assert!(!self.read_only, "Error: cannot trigger migration in read-only storage");
         assert!(self.threshold > 0, "Error: threshold must be valid");
         let redb_path = self.memory_dir.join("storage.redb");
         let redb = Arc::new(RedbEngine::new(redb_path)?);
@@ -143,19 +182,7 @@ impl Storage {
             };
         }
 
-        let state_clone = self.state.clone();
-        thread::spawn(move || {
-            let all_entries = json.get_all_entries();
-            let mut limit = 0;
-            for (k, v) in all_entries {
-                limit += 1;
-                assert!(limit <= 100000, "Error: migration entry limit exceeded");
-                let _ = redb.put(k, v);
-            }
-            if let Ok(mut w) = state_clone.write() {
-                *w = StorageState::Redb(redb);
-            }
-        });
+        migration::run_migration(self.state.clone(), json, redb);
 
         assert!(self.threshold > 0, "Error: post-condition trigger migration threshold check");
         Ok(())

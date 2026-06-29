@@ -1,24 +1,24 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
+use crate::dashboard::MonitorState;
 
-#[derive(Default, Clone)]
-pub struct MonitorState {
-    pub cpu_usage: f32,
-    pub ram_usage: f32,
-    pub alignment_score: f32,
-    pub local_free_energy: f64,
-    pub surprise: f64,
-    pub event_type: String,
-    pub recent_pain_events: Vec<String>,
-    pub active_links: Vec<String>,
+fn create_panel_block(title: &str) -> Block<'_> {
+    assert!(!title.is_empty(), "Error: panel title must not be empty");
+    assert!(title.len() < 1000, "Error: title is too long");
+    Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {} ", title))
+        .border_style(Style::default().fg(Color::Blue))
 }
 
-fn draw_homeostasis(frame: &mut Frame, area: Rect, state: &MonitorState) {
+pub fn draw_homeostasis(frame: &mut Frame, area: Rect, state: &MonitorState) {
+    assert!(area.width > 0, "Error: area width must be positive");
+    assert!(state.cpu_usage >= 0.0, "Error: cpu_usage must be non-negative");
     let cpu_bar = "█".repeat((state.cpu_usage / 5.0) as usize);
     let ram_bar = "█".repeat((state.ram_usage / 5.0) as usize);
     
@@ -36,14 +36,15 @@ fn draw_homeostasis(frame: &mut Frame, area: Rect, state: &MonitorState) {
         ]),
     ];
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" 1. Homeostasis (Physical Resources) ")
-        .border_style(Style::default().fg(Color::Blue));
-    frame.render_widget(Paragraph::new(text).block(block), area);
+    frame.render_widget(
+        Paragraph::new(text).block(create_panel_block("1. Homeostasis (Physical Resources)")),
+        area,
+    );
 }
 
-fn draw_active_inference(frame: &mut Frame, area: Rect, state: &MonitorState) {
+pub fn draw_active_inference(frame: &mut Frame, area: Rect, state: &MonitorState) {
+    assert!(area.width > 0, "Error: area width must be positive");
+    assert!(state.surprise >= 0.0, "Error: surprise must be non-negative");
     let text = vec![
         Line::from(vec![
             Span::styled("Local Free Energy (F): ", Style::default().add_modifier(Modifier::BOLD)),
@@ -56,14 +57,15 @@ fn draw_active_inference(frame: &mut Frame, area: Rect, state: &MonitorState) {
         ]),
     ];
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" 2. Active Inference Dynamics ")
-        .border_style(Style::default().fg(Color::Blue));
-    frame.render_widget(Paragraph::new(text).block(block), area);
+    frame.render_widget(
+        Paragraph::new(text).block(create_panel_block("2. Active Inference Dynamics")),
+        area,
+    );
 }
 
-fn draw_alignment(frame: &mut Frame, area: Rect, state: &MonitorState) {
+pub fn draw_alignment(frame: &mut Frame, area: Rect, state: &MonitorState) {
+    assert!(area.width > 0, "Error: area width must be positive");
+    assert!(state.alignment_score >= 0.0, "Error: alignment_score must be non-negative");
     let mut text = vec![
         Line::from(vec![
             Span::styled("Alignment Score (As): ", Style::default().add_modifier(Modifier::BOLD)),
@@ -83,14 +85,15 @@ fn draw_alignment(frame: &mut Frame, area: Rect, state: &MonitorState) {
         text.push(Line::from(Span::styled(event, Style::default().fg(Color::Red))));
     }
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" 3. Alignment Audit ")
-        .border_style(Style::default().fg(Color::Blue));
-    frame.render_widget(Paragraph::new(text).block(block), area);
+    frame.render_widget(
+        Paragraph::new(text).block(create_panel_block("3. Alignment Audit")),
+        area,
+    );
 }
 
-fn draw_topology(frame: &mut Frame, area: Rect, state: &MonitorState) {
+pub fn draw_topology(frame: &mut Frame, area: Rect, state: &MonitorState) {
+    assert!(area.width > 0, "Error: area width must be positive");
+    assert!(state.active_links.len() < 100_000, "Error: active_links size limit check");
     let mut text = vec![
         Line::from(Span::styled("Active Cluster Links:", Style::default().add_modifier(Modifier::BOLD))),
     ];
@@ -106,31 +109,8 @@ fn draw_topology(frame: &mut Frame, area: Rect, state: &MonitorState) {
         }
     }
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" 4. Topology Map ")
-        .border_style(Style::default().fg(Color::Blue));
-    frame.render_widget(Paragraph::new(text).block(block).wrap(Wrap { trim: true }), area);
-}
-
-pub fn draw_dashboard(frame: &mut Frame, state: &MonitorState) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(frame.size());
-
-    let top_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(chunks[0]);
-
-    let bottom_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(chunks[1]);
-
-    draw_homeostasis(frame, top_chunks[0], state);
-    draw_active_inference(frame, top_chunks[1], state);
-    draw_alignment(frame, bottom_chunks[0], state);
-    draw_topology(frame, bottom_chunks[1], state);
+    frame.render_widget(
+        Paragraph::new(text).block(create_panel_block("4. Topology Map")).wrap(Wrap { trim: true }),
+        area,
+    );
 }
